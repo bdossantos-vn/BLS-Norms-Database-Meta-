@@ -36,6 +36,9 @@
 - Norm tables can be filtered by saved-database fields such as Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age when available, with a reset button to return to all saved datasets. Metadata filters use exact metadata fields, so Brand does not use brand sentiment.
 - Norm tables page includes an explicit save-to-norms-database step that writes local dataset workbooks, a manifest, and an aggregate saved norms workbook.
 - Saved norms storage is anchored to the app directory by default and can be moved to shared persistent storage with `BLS_NORMS_DATA_DIR`.
+- Saved datasets are also backed up in `uploaded_datasets/` with separate folders for raw uploads, app-ready norm workbooks, and norm-setting backups.
+- If the working `norm_database/` is missing on startup, the app restores it from `uploaded_datasets/`.
+- GitHub autocommit can push `uploaded_datasets/` after dataset saves and saved-rule updates when `[github_autocommit]` Streamlit secrets are configured.
 - Dataset saves and saved-rule edits use a write lock and atomic manifest writes for cross-session protection.
 - Duplicate uploads are detected by respondent ID overlap when an ID field is available; 80% or higher overlap is flagged and requires replacement rather than duplicate saving.
 - Duplicate datasets are flagged during upload with a Dataset already added to norms notification.

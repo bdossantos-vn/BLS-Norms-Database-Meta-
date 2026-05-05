@@ -7,6 +7,8 @@ import base64
 import os
 import shutil
 import time
+import urllib.error
+import urllib.request
 from contextlib import contextmanager
 from difflib import SequenceMatcher
 from dataclasses import dataclass
@@ -51,6 +53,12 @@ NORM_DATABASE_DATASETS_DIR = NORM_DATABASE_DIR / "datasets"
 NORM_DATABASE_MANIFEST_PATH = NORM_DATABASE_DIR / "manifest.json"
 NORM_DATABASE_WORKBOOK_PATH = NORM_DATABASE_DIR / "saved_norm_tables.xlsx"
 NORM_DATABASE_LOCK_PATH = NORM_DATABASE_DIR / ".write.lock"
+UPLOADED_DATASETS_DIR = APP_DIR / "uploaded_datasets"
+UPLOADED_RAW_DIR = UPLOADED_DATASETS_DIR / "raw_uploads"
+UPLOADED_NORM_WORKBOOKS_DIR = UPLOADED_DATASETS_DIR / "norm_workbooks"
+UPLOADED_SETTINGS_DIR = UPLOADED_DATASETS_DIR / "norm_settings"
+UPLOADED_MANIFEST_BACKUP_PATH = UPLOADED_SETTINGS_DIR / "manifest.json"
+UPLOADED_NORM_TABLES_BACKUP_PATH = UPLOADED_SETTINGS_DIR / "saved_norm_tables.xlsx"
 NORM_DATASET_RESPONDENT_SHEET = "Respondent Data"
 NORM_DATASET_RULES_SHEET = "Rules"
 NORM_DATASET_NORM_RULES_SHEET = "Norm Rules"
@@ -3144,10 +3152,302 @@ def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
     return output.getvalue()
 
 
+def ensure_uploaded_dataset_dirs() -> None:
+    for directory in [
+        UPLOADED_RAW_DIR,
+        UPLOADED_NORM_WORKBOOKS_DIR,
+        UPLOADED_SETTINGS_DIR,
+    ]:
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+def safe_dataset_filename(value: object, fallback: str = "upload") -> str:
+    filename = normalize_answer(value) or fallback
+    filename = Path(filename).name
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("._")
+    return filename or fallback
+
+
+def uploaded_dataset_rules_path(dataset_id: str) -> Path:
+    return UPLOADED_SETTINGS_DIR / f"{safe_dataset_filename(dataset_id, 'dataset')}_rules.json"
+
+
+def uploaded_dataset_raw_path(record: dict) -> Path:
+    dataset_id = safe_dataset_filename(record.get("dataset_id"), "dataset")
+    uploaded_file = safe_dataset_filename(record.get("uploaded_file"), "raw_upload.xlsx")
+    suffix = Path(uploaded_file).suffix or ".xlsx"
+    stem = Path(uploaded_file).stem or "raw_upload"
+    return UPLOADED_RAW_DIR / f"{dataset_id}_{stem}{suffix}"
+
+
+def uploaded_dataset_workbook_path(dataset_id: str) -> Path:
+    return UPLOADED_NORM_WORKBOOKS_DIR / f"{safe_dataset_filename(dataset_id, 'dataset')}.xlsx"
+
+
+def restore_norm_database_from_uploaded_datasets_if_needed() -> None:
+    if NORM_DATABASE_MANIFEST_PATH.exists() or not UPLOADED_MANIFEST_BACKUP_PATH.exists():
+        return
+
+    try:
+        NORM_DATABASE_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(UPLOADED_MANIFEST_BACKUP_PATH, NORM_DATABASE_MANIFEST_PATH)
+        if UPLOADED_NORM_TABLES_BACKUP_PATH.exists():
+            shutil.copy2(UPLOADED_NORM_TABLES_BACKUP_PATH, NORM_DATABASE_WORKBOOK_PATH)
+        if UPLOADED_NORM_WORKBOOKS_DIR.exists():
+            for workbook_path in UPLOADED_NORM_WORKBOOKS_DIR.glob("*.xlsx"):
+                shutil.copy2(workbook_path, NORM_DATABASE_DATASETS_DIR / workbook_path.name)
+    except OSError:
+        return
+
+
+def backup_norm_database_to_uploaded_datasets(
+    records: list[dict],
+    record: dict | None = None,
+    raw_workbook_bytes: bytes | None = None,
+    rules: dict | None = None,
+) -> None:
+    ensure_uploaded_dataset_dirs()
+
+    try:
+        UPLOADED_MANIFEST_BACKUP_PATH.write_text(
+            json.dumps(records, indent=2, sort_keys=True) + "\n"
+        )
+        if NORM_DATABASE_WORKBOOK_PATH.exists():
+            shutil.copy2(NORM_DATABASE_WORKBOOK_PATH, UPLOADED_NORM_TABLES_BACKUP_PATH)
+
+        for saved_record in records:
+            dataset_id = normalize_answer(saved_record.get("dataset_id"))
+            if not dataset_id:
+                continue
+            source_dataset_path = norm_database_dataset_path(dataset_id)
+            if source_dataset_path.exists():
+                shutil.copy2(
+                    source_dataset_path,
+                    uploaded_dataset_workbook_path(dataset_id),
+                )
+
+        if not record:
+            return
+
+        dataset_id = normalize_answer(record.get("dataset_id"))
+        if not dataset_id:
+            return
+
+        if raw_workbook_bytes:
+            uploaded_dataset_raw_path(record).write_bytes(raw_workbook_bytes)
+
+        if rules is not None:
+            uploaded_dataset_rules_path(dataset_id).write_text(
+                json.dumps(rules, indent=2, sort_keys=True) + "\n"
+            )
+    except (OSError, TypeError):
+        return
+
+
+def streamlit_secret(section: str, key: str, default=None):
+    try:
+        section_values = st.secrets.get(section, {})
+        if hasattr(section_values, "get"):
+            return section_values.get(key, default)
+    except Exception:
+        return default
+    return default
+
+
+def truthy_config(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def github_autocommit_config() -> dict:
+    token = (
+        os.environ.get("GITHUB_AUTOCOMMIT_TOKEN")
+        or os.environ.get("GITHUB_TOKEN")
+        or streamlit_secret("github_autocommit", "token")
+        or streamlit_secret("github", "token")
+    )
+    repo = (
+        os.environ.get("GITHUB_AUTOCOMMIT_REPO")
+        or os.environ.get("GITHUB_REPOSITORY")
+        or streamlit_secret("github_autocommit", "repo")
+        or streamlit_secret("github", "repo")
+    )
+    branch = (
+        os.environ.get("GITHUB_AUTOCOMMIT_BRANCH")
+        or os.environ.get("GITHUB_BRANCH")
+        or streamlit_secret("github_autocommit", "branch")
+        or streamlit_secret("github", "branch")
+        or "main"
+    )
+    data_path = (
+        os.environ.get("GITHUB_AUTOCOMMIT_DATA_PATH")
+        or streamlit_secret("github_autocommit", "data_path")
+        or streamlit_secret("github", "data_path")
+        or UPLOADED_DATASETS_DIR.name
+    )
+    enabled_value = (
+        os.environ.get("GITHUB_AUTOCOMMIT_ENABLED")
+        or streamlit_secret("github_autocommit", "enabled")
+        or streamlit_secret("github", "autocommit")
+    )
+    enabled = truthy_config(enabled_value, default=bool(token and repo))
+    if repo:
+        repo = str(repo).strip()
+        repo = re.sub(r"^https://github\.com/", "", repo).strip("/")
+        repo = re.sub(r"\.git$", "", repo)
+
+    return {
+        "enabled": enabled,
+        "token": token,
+        "repo": repo,
+        "branch": branch,
+        "data_path": str(data_path).strip("/"),
+    }
+
+
+def github_api_request(
+    method: str,
+    path: str,
+    token: str,
+    payload: dict | None = None,
+) -> dict:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(
+        f"https://api.github.com{path}",
+        data=data,
+        method=method,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "bls-norms-streamlit-app",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response_body = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        try:
+            error_message = json.loads(error_body).get("message", error_body)
+        except json.JSONDecodeError:
+            error_message = error_body
+        raise RuntimeError(f"GitHub API error {exc.code}: {error_message}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"GitHub API connection error: {exc.reason}") from exc
+
+    return json.loads(response_body) if response_body else {}
+
+
+def uploaded_dataset_commit_files(data_path: str) -> list[tuple[str, bytes]]:
+    files: list[tuple[str, bytes]] = []
+    if not UPLOADED_DATASETS_DIR.exists():
+        return files
+
+    for path in sorted(UPLOADED_DATASETS_DIR.rglob("*")):
+        if not path.is_file() or path.name == ".DS_Store":
+            continue
+        relative_path = path.relative_to(UPLOADED_DATASETS_DIR).as_posix()
+        files.append((f"{data_path}/{relative_path}", path.read_bytes()))
+
+    return files
+
+
+def github_autocommit_uploaded_datasets(commit_message: str) -> tuple[bool, str]:
+    config = github_autocommit_config()
+    if not config["enabled"]:
+        return False, "GitHub autocommit is not configured."
+    if not config["token"] or not config["repo"]:
+        return False, "GitHub autocommit needs a token and repo in Streamlit secrets."
+
+    files = uploaded_dataset_commit_files(config["data_path"])
+    if not files:
+        return False, "No uploaded dataset backup files were available to commit."
+
+    repo_path = f"/repos/{config['repo']}"
+    branch = config["branch"]
+
+    try:
+        ref = github_api_request(
+            "GET",
+            f"{repo_path}/git/ref/heads/{branch}",
+            config["token"],
+        )
+        parent_sha = ref["object"]["sha"]
+        parent_commit = github_api_request(
+            "GET",
+            f"{repo_path}/git/commits/{parent_sha}",
+            config["token"],
+        )
+        base_tree_sha = parent_commit["tree"]["sha"]
+
+        tree_entries = []
+        for file_path, content in files:
+            blob = github_api_request(
+                "POST",
+                f"{repo_path}/git/blobs",
+                config["token"],
+                {
+                    "content": base64.b64encode(content).decode("ascii"),
+                    "encoding": "base64",
+                },
+            )
+            tree_entries.append(
+                {
+                    "path": file_path,
+                    "mode": "100644",
+                    "type": "blob",
+                    "sha": blob["sha"],
+                }
+            )
+
+        tree = github_api_request(
+            "POST",
+            f"{repo_path}/git/trees",
+            config["token"],
+            {
+                "base_tree": base_tree_sha,
+                "tree": tree_entries,
+            },
+        )
+        if tree["sha"] == base_tree_sha:
+            return True, "GitHub autocommit found no file changes."
+
+        commit = github_api_request(
+            "POST",
+            f"{repo_path}/git/commits",
+            config["token"],
+            {
+                "message": commit_message,
+                "tree": tree["sha"],
+                "parents": [parent_sha],
+            },
+        )
+        github_api_request(
+            "PATCH",
+            f"{repo_path}/git/refs/heads/{branch}",
+            config["token"],
+            {
+                "sha": commit["sha"],
+                "force": False,
+            },
+        )
+    except (KeyError, RuntimeError) as exc:
+        return False, f"GitHub autocommit failed: {exc}"
+
+    return True, f"GitHub autocommit saved `{config['data_path']}` to `{config['repo']}`."
+
+
 def migrate_legacy_norm_database_if_needed() -> None:
     if NORM_DATABASE_DIR == NORM_DATABASE_LEGACY_DIR:
+        restore_norm_database_from_uploaded_datasets_if_needed()
         return
     if not NORM_DATABASE_LEGACY_DIR.exists() or NORM_DATABASE_MANIFEST_PATH.exists():
+        restore_norm_database_from_uploaded_datasets_if_needed()
         return
 
     try:
@@ -3159,6 +3459,7 @@ def migrate_legacy_norm_database_if_needed() -> None:
         )
     except OSError:
         return
+    restore_norm_database_from_uploaded_datasets_if_needed()
 
 
 def ensure_norm_database_dirs() -> None:
@@ -3218,7 +3519,10 @@ def load_norm_database_manifest() -> list[dict]:
     except (json.JSONDecodeError, OSError):
         return []
 
-    return data if isinstance(data, list) else []
+    records = data if isinstance(data, list) else []
+    if records and not UPLOADED_MANIFEST_BACKUP_PATH.exists():
+        backup_norm_database_to_uploaded_datasets(records)
+    return records
 
 
 def save_norm_database_manifest(records: list[dict]) -> None:
@@ -3796,11 +4100,13 @@ def save_norm_dataset_to_database(
     tables: dict[str, pd.DataFrame],
     source_data: pd.DataFrame | None = None,
     rules: dict | None = None,
+    raw_workbook_bytes: bytes | None = None,
     replace_existing: bool = False,
 ) -> tuple[bool, str]:
     if not tables:
         return False, "No norm tables are available to save."
 
+    saved_record_for_commit = None
     try:
         with norm_database_write_lock():
             records = load_norm_database_manifest()
@@ -3835,9 +4141,27 @@ def save_norm_dataset_to_database(
 
             save_norm_database_manifest(records)
             refresh_norm_database_workbook(records)
-            return True, "Dataset has been added."
+            backup_norm_database_to_uploaded_datasets(
+                records,
+                saved_record,
+                raw_workbook_bytes,
+                rules,
+            )
+            saved_record_for_commit = saved_record
     except TimeoutError as exc:
         return False, str(exc)
+
+    dataset_id = (
+        normalize_answer(saved_record_for_commit.get("dataset_id"))
+        if saved_record_for_commit
+        else "dataset"
+    )
+    commit_ok, commit_message = github_autocommit_uploaded_datasets(
+        f"Save BLS norms dataset {dataset_id}"
+    )
+    if commit_ok:
+        return True, f"Dataset has been added. {commit_message}"
+    return True, f"Dataset has been added. {commit_message}"
 
 
 def render_norm_database_save_controls(
@@ -3845,6 +4169,7 @@ def render_norm_database_save_controls(
     tables: dict[str, pd.DataFrame],
     source_data: pd.DataFrame,
     rules: dict,
+    raw_workbook_bytes: bytes | None = None,
     standards_change_issues: list[dict] | None = None,
     standards_change_confirmed: bool = True,
 ) -> None:
@@ -3913,6 +4238,7 @@ def render_norm_database_save_controls(
                 tables,
                 source_data,
                 rules,
+                raw_workbook_bytes,
                 replace_existing=True,
             )
             if success:
@@ -3930,6 +4256,7 @@ def render_norm_database_save_controls(
                 tables,
                 source_data,
                 rules,
+                raw_workbook_bytes,
             )
             if success:
                 st.success(message)
@@ -4046,6 +4373,7 @@ def update_saved_norm_dataset_rules(
     updated_rules: dict,
     tables: dict[str, pd.DataFrame],
 ) -> tuple[bool, str]:
+    updated_record_for_commit = None
     try:
         with norm_database_write_lock():
             records = load_norm_database_manifest()
@@ -4089,9 +4417,25 @@ def update_saved_norm_dataset_rules(
             records[record_index] = updated_record
             save_norm_database_manifest(records)
             refresh_norm_database_workbook(records)
-            return True, "Saved dataset rules updated and norm tables regenerated."
+            backup_norm_database_to_uploaded_datasets(
+                records,
+                updated_record,
+                None,
+                updated_rules,
+            )
+            updated_record_for_commit = updated_record
     except TimeoutError as exc:
         return False, str(exc)
+
+    dataset_id = (
+        normalize_answer(updated_record_for_commit.get("dataset_id"))
+        if updated_record_for_commit
+        else "dataset"
+    )
+    _commit_ok, commit_message = github_autocommit_uploaded_datasets(
+        f"Update BLS norms dataset rules {dataset_id}"
+    )
+    return True, f"Saved dataset rules updated and norm tables regenerated. {commit_message}"
 
 
 def render_saved_datasets_tab() -> None:
@@ -4899,6 +5243,7 @@ def main() -> None:
                     full_tables,
                     data,
                     database_rules,
+                    workbook_bytes,
                     audit_consistency_issues,
                     audit_consistency_confirmed,
                 )

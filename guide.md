@@ -83,6 +83,21 @@ The save step uses the full audited upload, not temporary Norm table filters. By
 
 For shared deployments, set `BLS_NORMS_DATA_DIR` to an absolute shared or mounted persistent directory. This keeps saved datasets available after app restarts and lets users on different devices write to the same norms database. Saves and saved-rule updates use a write lock and atomic manifest writes to protect the database from overlapping browser sessions.
 
+The app also keeps a repo-facing backup folder at `uploaded_datasets/`. Raw uploaded workbooks are saved under `uploaded_datasets/raw_uploads/`, the app-ready saved norm workbooks are saved under `uploaded_datasets/norm_workbooks/`, and manifest/rule backups are saved under `uploaded_datasets/norm_settings/`. If `norm_database/` is missing on startup, the app restores from those backups.
+
+On Streamlit Cloud, GitHub autocommit can push `uploaded_datasets/` back to the repository after each dataset save or saved-rule update. Add this to Streamlit secrets, using a GitHub token with repository Contents read/write access:
+
+```toml
+[github_autocommit]
+enabled = true
+repo = "OWNER/REPO"
+branch = "main"
+token = "github_pat_or_classic_token"
+data_path = "uploaded_datasets"
+```
+
+If GitHub autocommit is not configured, runtime writes to `uploaded_datasets/` still need to be manually committed or otherwise synced to GitHub to survive redeploys.
+
 The app checks each upload against saved respondent IDs when an ID field such as ResponseId is available. If 80% or more of unique respondent IDs overlap with a saved dataset in either direction, the upload page shows Dataset already added to norms and the save step requires Replace saved dataset instead of creating a duplicate. If no respondent ID field is available, the app falls back to exact cleaned-data matching rather than file name.
 
 Use the Saved datasets page to edit previous dataset rules if standards change. The editor can update whether a source variable is included, its norm/benchmark mapping, denominator, question type, T2B/T3B/B2B/B3B selections, and the control/test setup. Saving updated rules regenerates that dataset workbook and the aggregate saved norms workbook.

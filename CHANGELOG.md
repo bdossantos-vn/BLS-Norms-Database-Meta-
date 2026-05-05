@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Added optional GitHub autocommit for `uploaded_datasets/` after dataset saves and saved-rule updates.
+- Added a repo-facing `uploaded_datasets/` backup folder with raw uploads, saved norm workbooks, and norm-setting backups.
+- Added startup restore from `uploaded_datasets/` when the working norms database is missing.
 - Anchored saved norms storage to the app directory, with optional `BLS_NORMS_DATA_DIR` support for shared persistent storage.
 - Added a norms database write lock and atomic manifest writes to protect saves from overlapping browser sessions.
 - Changed the Norm tables page to always show the saved norms database instead of replacing it with the current upload preview.

@@ -60,6 +60,21 @@ streamlit run app.py
 - Saving to the norms database is an explicit action on the Norm tables page after setup and review.
 - Saved norm datasets are stored in persistent app-level storage, with one workbook per saved dataset and an aggregate `saved_norm_tables.xlsx` workbook.
 - By default, saved norms live under the app folder at `norm_database/`, so restarting Streamlit from a different working directory does not make the database look empty.
+- Each saved dataset is also backed up under `uploaded_datasets/`: raw uploads go to `raw_uploads/`, app-ready saved norm workbooks go to `norm_workbooks/`, and manifest/rule backups go to `norm_settings/`.
+- On startup, if the working `norm_database/` is missing, the app restores it from `uploaded_datasets/`.
+- On Streamlit Cloud, GitHub autocommit can save `uploaded_datasets/` back to the repository after each dataset save or saved-rule update.
+- Configure GitHub autocommit in Streamlit secrets with a token that has repository Contents read/write access:
+
+```toml
+[github_autocommit]
+enabled = true
+repo = "OWNER/REPO"
+branch = "main"
+token = "github_pat_or_classic_token"
+data_path = "uploaded_datasets"
+```
+
+- If GitHub autocommit is not configured, files written to `uploaded_datasets/` still need to be committed or otherwise synced to GitHub to survive redeploys.
 - Set `BLS_NORMS_DATA_DIR` to an absolute shared/persistent directory when hosting the app for multiple devices or on a server with mounted persistent storage.
 - Saves and saved-rule updates use a database write lock and atomic manifest writes so overlapping browser sessions do not overwrite each other.
 - Duplicate-upload safeguards use respondent ID overlap when an ID field such as `ResponseId` is available; 80% or higher overlap is flagged as a possible duplicate.
