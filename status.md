@@ -27,14 +27,16 @@
 - Response-option counting now follows the Smart Tables exact-match plus common multi-select delimiter matching pattern.
 - Norm calculations run at the response-option level.
 - Norm tables use audited norm/benchmark variable labels as table headings rather than QNR question text.
-- Norm tables default to the saved norms database when no workbook is active.
+- Norm tables always show the saved norms database; active uploads only add save-to-database controls.
 - Norm tables are limited to Response option, Control, Test, Lift, and Significance result.
 - Control and Test percentages are rounded to whole percentages with no decimals.
 - Lift is rounded to whole percentage points with no decimals.
 - On-screen norm tables render as BLS-style white tables with black text.
 - Norm tables include one denominator-labeled Base size row per metric and do not include response-option selected-count columns.
-- Norm tables can be filtered by Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age, with a reset button to return to total control vs test. Metadata filters use exact metadata fields, so Brand does not use brand sentiment.
+- Norm tables can be filtered by saved-database fields such as Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age when available, with a reset button to return to all saved datasets. Metadata filters use exact metadata fields, so Brand does not use brand sentiment.
 - Norm tables page includes an explicit save-to-norms-database step that writes local dataset workbooks, a manifest, and an aggregate saved norms workbook.
+- Saved norms storage is anchored to the app directory by default and can be moved to shared persistent storage with `BLS_NORMS_DATA_DIR`.
+- Dataset saves and saved-rule edits use a write lock and atomic manifest writes for cross-session protection.
 - Duplicate uploads are detected by respondent ID overlap when an ID field is available; 80% or higher overlap is flagged and requires replacement rather than duplicate saving.
 - Duplicate datasets are flagged during upload with a Dataset already added to norms notification.
 - Saved datasets page can edit previous dataset rules and regenerate saved norm tables when standards change.

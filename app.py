@@ -4,6 +4,10 @@ import hashlib
 import json
 import math
 import base64
+import os
+import shutil
+import time
+from contextlib import contextmanager
 from difflib import SequenceMatcher
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,18 +25,32 @@ DENOMINATOR_OPTIONS = ["Total answering", "Total sample"]
 NOT_AVAILABLE = "Not available"
 NOT_TESTED = "Not tested"
 NA_NORM_OPTION = "NA"
-SETTINGS_PATH = Path("denominator_settings.json")
-NORM_MAPPING_PATH = Path("norm_mapping_settings.json")
-BOX_SCORE_SETTINGS_PATH = Path("box_score_settings.json")
-QUESTION_TYPE_SETTINGS_PATH = Path("question_type_settings.json")
-NA_ALIAS_SETTINGS_PATH = Path("na_alias_settings.json")
-CHANGELOG_PATH = Path("CHANGELOG.md")
-STATUS_PATH = Path("status.md")
-LOGO_PATH = Path("assets") / "vn_logo.png"
-NORM_DATABASE_DIR = Path("norm_database")
+APP_DIR = Path(__file__).resolve().parent
+SETTINGS_PATH = APP_DIR / "denominator_settings.json"
+NORM_MAPPING_PATH = APP_DIR / "norm_mapping_settings.json"
+BOX_SCORE_SETTINGS_PATH = APP_DIR / "box_score_settings.json"
+QUESTION_TYPE_SETTINGS_PATH = APP_DIR / "question_type_settings.json"
+NA_ALIAS_SETTINGS_PATH = APP_DIR / "na_alias_settings.json"
+CHANGELOG_PATH = APP_DIR / "CHANGELOG.md"
+STATUS_PATH = APP_DIR / "status.md"
+LOGO_PATH = APP_DIR / "assets" / "vn_logo.png"
+
+
+def configured_norm_database_dir() -> Path:
+    configured_path = os.environ.get("BLS_NORMS_DATA_DIR")
+    if not configured_path:
+        return APP_DIR / "norm_database"
+
+    path = Path(configured_path).expanduser()
+    return path if path.is_absolute() else APP_DIR / path
+
+
+NORM_DATABASE_LEGACY_DIR = APP_DIR / "norm_database"
+NORM_DATABASE_DIR = configured_norm_database_dir()
 NORM_DATABASE_DATASETS_DIR = NORM_DATABASE_DIR / "datasets"
 NORM_DATABASE_MANIFEST_PATH = NORM_DATABASE_DIR / "manifest.json"
 NORM_DATABASE_WORKBOOK_PATH = NORM_DATABASE_DIR / "saved_norm_tables.xlsx"
+NORM_DATABASE_LOCK_PATH = NORM_DATABASE_DIR / ".write.lock"
 NORM_DATASET_RESPONDENT_SHEET = "Respondent Data"
 NORM_DATASET_RULES_SHEET = "Rules"
 NORM_DATASET_NORM_RULES_SHEET = "Norm Rules"
@@ -2948,6 +2966,74 @@ def render_norm_filter_controls(
     return filtered_df
 
 
+def render_saved_norm_filter_controls(saved_tables: pd.DataFrame) -> pd.DataFrame:
+    st.subheader("Filters")
+    st.caption("Filter saved datasets before reviewing norm tables. Reset returns to all saved datasets.")
+
+    reset_col, status_col = st.columns([1, 3])
+    if reset_col.button("Reset to total control vs test", use_container_width=True):
+        reset_norm_filters()
+
+    selected_filters: dict[str, list[str]] = {}
+    active_filter_descriptions: list[str] = []
+    unavailable_filters: list[str] = []
+    filter_columns = st.columns(3)
+
+    for index, (label, aliases) in enumerate(NORM_FILTER_FIELDS):
+        key = norm_filter_key(label)
+        column = filter_column_for_field(
+            saved_tables,
+            {},
+            aliases,
+            exact_match=label in EXACT_NORM_FILTERS,
+        )
+        column_container = filter_columns[index % len(filter_columns)]
+
+        if column is None:
+            st.session_state[key] = []
+            unavailable_filters.append(label)
+            column_container.button(
+                f"{label}: Not available",
+                disabled=True,
+                use_container_width=True,
+            )
+            continue
+
+        options = filter_option_values(saved_tables[column])
+        st.session_state[key] = [
+            value
+            for value in st.session_state.get(key, [])
+            if value in options
+        ]
+
+        with column_container.popover(label, use_container_width=True):
+            st.multiselect(
+                f"{label} values",
+                options,
+                key=key,
+                placeholder="All",
+            )
+            st.caption(f"Source variable: {column}")
+
+        selected_values = st.session_state.get(key, [])
+        if selected_values:
+            selected_filters[column] = selected_values
+            active_filter_descriptions.append(
+                describe_norm_filter(label, column, selected_values, {})
+            )
+
+    filtered_tables = apply_norm_filters(saved_tables, selected_filters)
+    if active_filter_descriptions:
+        status_col.caption("Active filters: " + " | ".join(active_filter_descriptions))
+    else:
+        status_col.caption("No filters applied. Tables show all saved datasets.")
+
+    if unavailable_filters:
+        st.caption("Unavailable filters: " + ", ".join(unavailable_filters))
+
+    return filtered_tables
+
+
 def prompt_for_missing_project_metadata(
     df: pd.DataFrame,
     question_labels: dict[str, str],
@@ -3058,11 +3144,72 @@ def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
     return output.getvalue()
 
 
+def migrate_legacy_norm_database_if_needed() -> None:
+    if NORM_DATABASE_DIR == NORM_DATABASE_LEGACY_DIR:
+        return
+    if not NORM_DATABASE_LEGACY_DIR.exists() or NORM_DATABASE_MANIFEST_PATH.exists():
+        return
+
+    try:
+        NORM_DATABASE_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            NORM_DATABASE_LEGACY_DIR,
+            NORM_DATABASE_DIR,
+            dirs_exist_ok=True,
+        )
+    except OSError:
+        return
+
+
 def ensure_norm_database_dirs() -> None:
+    migrate_legacy_norm_database_if_needed()
     NORM_DATABASE_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+@contextmanager
+def norm_database_write_lock(timeout_seconds: int = 30):
+    migrate_legacy_norm_database_if_needed()
+    NORM_DATABASE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_fd = None
+    start_time = time.time()
+
+    while True:
+        try:
+            lock_fd = os.open(
+                NORM_DATABASE_LOCK_PATH,
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            )
+            os.write(
+                lock_fd,
+                f"{os.getpid()} {datetime.now().isoformat()}".encode("utf-8"),
+            )
+            break
+        except FileExistsError:
+            try:
+                lock_age = time.time() - NORM_DATABASE_LOCK_PATH.stat().st_mtime
+                if lock_age > 300:
+                    NORM_DATABASE_LOCK_PATH.unlink()
+                    continue
+            except FileNotFoundError:
+                continue
+
+            if time.time() - start_time > timeout_seconds:
+                raise TimeoutError("Norms database is busy. Try again in a moment.")
+            time.sleep(0.1)
+
+    try:
+        yield
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+        try:
+            NORM_DATABASE_LOCK_PATH.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def load_norm_database_manifest() -> list[dict]:
+    migrate_legacy_norm_database_if_needed()
     if not NORM_DATABASE_MANIFEST_PATH.exists():
         return []
 
@@ -3076,9 +3223,9 @@ def load_norm_database_manifest() -> list[dict]:
 
 def save_norm_database_manifest(records: list[dict]) -> None:
     ensure_norm_database_dirs()
-    NORM_DATABASE_MANIFEST_PATH.write_text(
-        json.dumps(records, indent=2, sort_keys=True) + "\n"
-    )
+    temp_path = NORM_DATABASE_MANIFEST_PATH.with_suffix(".json.tmp")
+    temp_path.write_text(json.dumps(records, indent=2, sort_keys=True) + "\n")
+    temp_path.replace(NORM_DATABASE_MANIFEST_PATH)
 
 
 def norm_upload_fingerprint(workbook_bytes: bytes, data_sheet: str | None) -> str:
@@ -3654,39 +3801,43 @@ def save_norm_dataset_to_database(
     if not tables:
         return False, "No norm tables are available to save."
 
-    records = load_norm_database_manifest()
-    duplicate_match = find_norm_database_duplicate_record(
-        records,
-        record,
-        DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
-    )
-    existing_index = (
-        records.index(duplicate_match["record"])
-        if duplicate_match and duplicate_match.get("record") in records
-        else None
-    )
-    if existing_index is not None and not replace_existing:
-        return False, f"Possible duplicate upload: {duplicate_match_label(duplicate_match)}."
+    try:
+        with norm_database_write_lock():
+            records = load_norm_database_manifest()
+            duplicate_match = find_norm_database_duplicate_record(
+                records,
+                record,
+                DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
+            )
+            existing_index = (
+                records.index(duplicate_match["record"])
+                if duplicate_match and duplicate_match.get("record") in records
+                else None
+            )
+            if existing_index is not None and not replace_existing:
+                return False, f"Possible duplicate upload: {duplicate_match_label(duplicate_match)}."
 
-    saved_record = {
-        **record,
-        "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    if existing_index is not None:
-        saved_record["dataset_id"] = records[existing_index].get(
-            "dataset_id",
-            saved_record["dataset_id"],
-        )
-    write_norm_dataset_workbook(saved_record, tables, source_data, rules)
+            saved_record = {
+                **record,
+                "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            if existing_index is not None:
+                saved_record["dataset_id"] = records[existing_index].get(
+                    "dataset_id",
+                    saved_record["dataset_id"],
+                )
+            write_norm_dataset_workbook(saved_record, tables, source_data, rules)
 
-    if existing_index is None:
-        records.append(saved_record)
-    else:
-        records[existing_index] = saved_record
+            if existing_index is None:
+                records.append(saved_record)
+            else:
+                records[existing_index] = saved_record
 
-    save_norm_database_manifest(records)
-    refresh_norm_database_workbook(records)
-    return True, "Dataset has been added."
+            save_norm_database_manifest(records)
+            refresh_norm_database_workbook(records)
+            return True, "Dataset has been added."
+    except TimeoutError as exc:
+        return False, str(exc)
 
 
 def render_norm_database_save_controls(
@@ -3895,48 +4046,52 @@ def update_saved_norm_dataset_rules(
     updated_rules: dict,
     tables: dict[str, pd.DataFrame],
 ) -> tuple[bool, str]:
-    records = load_norm_database_manifest()
-    dataset_id = record.get("dataset_id")
-    record_index = next(
-        (
-            index
-            for index, saved_record in enumerate(records)
-            if saved_record.get("dataset_id") == dataset_id
-        ),
-        None,
-    )
-    if record_index is None:
-        return False, "Saved dataset record was not found in the manifest."
+    try:
+        with norm_database_write_lock():
+            records = load_norm_database_manifest()
+            dataset_id = record.get("dataset_id")
+            record_index = next(
+                (
+                    index
+                    for index, saved_record in enumerate(records)
+                    if saved_record.get("dataset_id") == dataset_id
+                ),
+                None,
+            )
+            if record_index is None:
+                return False, "Saved dataset record was not found in the manifest."
 
-    included_mappings = {
-        rule["Source variable"]: rule["Norm / benchmark"]
-        for rule in updated_rules.get("norm_rules", [])
-        if rule.get("Include") and rule.get("Norm / benchmark") != NA_NORM_OPTION
-    }
-    denominator_settings = {
-        rule["Source variable"]: rule.get("Denominator", DEFAULT_DENOMINATOR)
-        for rule in updated_rules.get("norm_rules", [])
-        if rule.get("Include") and rule.get("Norm / benchmark") != NA_NORM_OPTION
-    }
-    updated_record = {
-        **record,
-        "row_count": int(len(source_data)),
-        "column_count": int(len(source_data.columns)),
-        "norm_count": int(len(included_mappings)),
-        "group_column": updated_rules.get("group_column", record.get("group_column")),
-        "control_label": updated_rules.get("control_label", record.get("control_label")),
-        "test_label": updated_rules.get("test_label", record.get("test_label")),
-        "metadata_values": project_metadata_values(source_data),
-        "norm_mappings": included_mappings,
-        "denominator_settings": denominator_settings,
-        "rules_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
+            included_mappings = {
+                rule["Source variable"]: rule["Norm / benchmark"]
+                for rule in updated_rules.get("norm_rules", [])
+                if rule.get("Include") and rule.get("Norm / benchmark") != NA_NORM_OPTION
+            }
+            denominator_settings = {
+                rule["Source variable"]: rule.get("Denominator", DEFAULT_DENOMINATOR)
+                for rule in updated_rules.get("norm_rules", [])
+                if rule.get("Include") and rule.get("Norm / benchmark") != NA_NORM_OPTION
+            }
+            updated_record = {
+                **record,
+                "row_count": int(len(source_data)),
+                "column_count": int(len(source_data.columns)),
+                "norm_count": int(len(included_mappings)),
+                "group_column": updated_rules.get("group_column", record.get("group_column")),
+                "control_label": updated_rules.get("control_label", record.get("control_label")),
+                "test_label": updated_rules.get("test_label", record.get("test_label")),
+                "metadata_values": project_metadata_values(source_data),
+                "norm_mappings": included_mappings,
+                "denominator_settings": denominator_settings,
+                "rules_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
 
-    write_norm_dataset_workbook(updated_record, tables, source_data, updated_rules)
-    records[record_index] = updated_record
-    save_norm_database_manifest(records)
-    refresh_norm_database_workbook(records)
-    return True, "Saved dataset rules updated and norm tables regenerated."
+            write_norm_dataset_workbook(updated_record, tables, source_data, updated_rules)
+            records[record_index] = updated_record
+            save_norm_database_manifest(records)
+            refresh_norm_database_workbook(records)
+            return True, "Saved dataset rules updated and norm tables regenerated."
+    except TimeoutError as exc:
+        return False, str(exc)
 
 
 def render_saved_datasets_tab() -> None:
@@ -4154,8 +4309,19 @@ def render_saved_norm_tables_review() -> None:
     saved_tables = load_saved_norm_tables()
     saved_records = load_norm_database_manifest()
 
+    if not saved_tables.empty:
+        saved_tables = render_saved_norm_filter_controls(saved_tables)
+
     metric_cols = st.columns(3)
-    metric_cols[0].metric("Saved datasets", f"{len(saved_records):,}")
+    saved_dataset_count = (
+        saved_tables["Dataset ID"].nunique()
+        if "Dataset ID" in saved_tables.columns
+        else len(saved_records)
+    )
+    metric_cols[0].metric(
+        "Saved datasets",
+        f"{saved_dataset_count:,}",
+    )
     metric_cols[1].metric("Saved rows", f"{len(saved_tables):,}")
     metric_cols[2].metric(
         "Saved metrics",
@@ -4163,7 +4329,7 @@ def render_saved_norm_tables_review() -> None:
     )
 
     if saved_tables.empty:
-        st.info("No saved norm tables are available yet.")
+        st.info("No saved norm tables are available for the current filters.")
         return
 
     table_columns = [
@@ -4667,23 +4833,12 @@ def main() -> None:
 
     with norms_tab:
         render_page_navigation(2, review_saved_norms)
-        if review_saved_norms or data is None:
-            render_saved_norm_tables_review()
-        elif not setup_complete:
+        if not review_saved_norms and data is not None and not setup_complete:
             st.info(
-                "Complete the Survey Question Audit to preview tables for this uploaded "
-                "dataset. The saved norms database is shown when no workbook is active."
+                "Complete the Survey Question Audit to enable saving this upload. "
+                "The saved norms database is shown below."
             )
-        else:
-            all_tables: dict[str, pd.DataFrame] = {}
-            filtered_data = render_norm_filter_controls(
-                data,
-                group_column,
-                control_label,
-                test_label,
-                question_labels,
-                response_labels,
-            )
+        elif not review_saved_norms and setup_complete:
             effective_denominator_settings = {
                 question: selected_denominators.get(
                     question,
@@ -4691,24 +4846,6 @@ def main() -> None:
                 )
                 for question in norm_questions
             }
-            all_tables = build_norm_tables(
-                filtered_data,
-                norm_questions,
-                included_mappings,
-                group_column,
-                control_label,
-                test_label,
-                effective_denominator_settings,
-                split_multi_select,
-                delimiter,
-                response_labels,
-                question_labels,
-                box_score_settings,
-                saved_box_score_settings,
-                question_type_settings,
-                saved_question_type_settings,
-            )
-
             if workbook_bytes is not None and data_sheet is not None:
                 full_tables = build_norm_tables(
                     data,
@@ -4766,27 +4903,7 @@ def main() -> None:
                     audit_consistency_confirmed,
                 )
 
-            for question in norm_questions:
-                mapped_norm = included_mappings.get(question, question)
-                denominator_setting = effective_denominator_settings.get(
-                    question,
-                    DEFAULT_DENOMINATOR,
-                )
-                norm_table = all_tables.get(f"{mapped_norm}__{question}", pd.DataFrame())
-
-                st.subheader(mapped_norm)
-                st.caption(
-                    f"Source variable: {question} "
-                    f"| Denominator: {denominator_setting}"
-                )
-                render_norm_table(norm_table)
-
-            st.download_button(
-                "Download norm tables Excel",
-                data=norm_tables_to_excel(all_tables),
-                file_name="norm_tables.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
+        render_saved_norm_tables_review()
 
         render_page_navigation(2, review_saved_norms)
 

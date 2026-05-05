@@ -8,13 +8,13 @@ Norm tables use the audited norm/benchmark variable label as the table heading. 
 
 On-screen norm tables use a BLS-style white table with black text for readability.
 
-When no workbook is active, the Norm tables page shows the saved norms database. Upload setup is only required when previewing or saving a new uploaded dataset.
+The Norm tables page shows the saved norms database. When a workbook is active, that upload is used for the save-to-database step and does not replace the saved database view.
 
 Each metric includes one Base size row labeled with the denominator setting. Response-option rows show Control and Test as percentages; the app does not show selected-count columns for each response option.
 
-Use the filter buttons above the Norm tables to limit calculations to a subset of respondent rows. Available filters are Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age. Metadata filters use exact variable or label matches, so the Brand filter uses the Brand field rather than metric columns such as brand sentiment.
+Use the filter buttons above the Norm tables to limit the saved database rows being reviewed. Available filters are Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age when those fields exist in the saved database view. Metadata filters use exact variable or label matches, so the Brand filter uses the Brand field rather than metric columns such as brand sentiment.
 
-The Reset to total control vs test button clears all filter selections and recalculates using the full selected control and test samples.
+The Reset to total control vs test button clears all filter selections and returns to all saved datasets.
 
 ## Excel Input
 
@@ -79,7 +79,9 @@ When any box-score option is selected for a question, the norm table shows only 
 
 After the Survey Question Audit and denominator settings are reviewed, use Save dataset to norms database on the Norm tables page. This is an explicit save step so uploads are not silently added to the database.
 
-The save step uses the full audited upload, not temporary Norm table filters. It writes one dataset workbook under `norm_database/datasets/`, updates `norm_database/manifest.json`, and refreshes the aggregate workbook at `norm_database/saved_norm_tables.xlsx`.
+The save step uses the full audited upload, not temporary Norm table filters. By default, it writes one dataset workbook under the app folder at `norm_database/datasets/`, updates `norm_database/manifest.json`, and refreshes the aggregate workbook at `norm_database/saved_norm_tables.xlsx`.
+
+For shared deployments, set `BLS_NORMS_DATA_DIR` to an absolute shared or mounted persistent directory. This keeps saved datasets available after app restarts and lets users on different devices write to the same norms database. Saves and saved-rule updates use a write lock and atomic manifest writes to protect the database from overlapping browser sessions.
 
 The app checks each upload against saved respondent IDs when an ID field such as ResponseId is available. If 80% or more of unique respondent IDs overlap with a saved dataset in either direction, the upload page shows Dataset already added to norms and the save step requires Replace saved dataset instead of creating a duplicate. If no respondent ID field is available, the app falls back to exact cleaned-data matching rather than file name.
 

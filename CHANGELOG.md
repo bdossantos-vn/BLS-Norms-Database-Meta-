@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Anchored saved norms storage to the app directory, with optional `BLS_NORMS_DATA_DIR` support for shared persistent storage.
+- Added a norms database write lock and atomic manifest writes to protect saves from overlapping browser sessions.
+- Changed the Norm tables page to always show the saved norms database instead of replacing it with the current upload preview.
+- Changed Norm tables filters to filter the saved database view.
 - Added saved-dataset rule matching in the Norm / benchmark audit so prior T2B/T3B/B2B/B3B choices are reused and conflicting changes require confirmation.
 - Changed Control and Test percentage formatting to whole rounded percentages with no decimals.
 - Changed lift formatting to whole percentage points with no decimals.

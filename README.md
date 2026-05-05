@@ -36,9 +36,9 @@ streamlit run app.py
 - T2B and T3B use the first two or three ordered non-exclusive scale options; B2B and B3B use the last two or three ordered non-exclusive scale options.
 - When any T2B/T3B/B2B/B3B option is selected for a question, the norm table shows only the selected box-score rows for that question instead of the full scale.
 - Norm tables can be filtered by Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age when those variables or labels exist in the uploaded workbook.
-- Project, Brand, Client, Industry, Country, Year, and Quarter filters use exact metadata-variable matches so metric columns such as brand sentiment are not used as filters.
-- Reset to total control vs test clears all norm table filters and recalculates tables on the full selected control/test sample.
-- Norm tables default to the saved norms database when no workbook is active.
+- Norm table filters apply to the saved database view. Project, Brand, Client, Industry, Country, Year, and Quarter filters use exact metadata-variable matches so metric columns such as brand sentiment are not used as filters.
+- Reset to total control vs test clears all norm table filters and returns to all saved datasets.
+- Norm tables always show the saved norms database. When a workbook is active, the upload is used for the save-to-database step rather than replacing the saved database view.
 - Norm tables are headed by the audited norm/benchmark variable label rather than QNR question text.
 - Norm table output is limited to Response option, Control, Test, Lift, and Significance result.
 - Control and Test percentages are displayed as rounded whole percentages with no decimals.
@@ -58,7 +58,10 @@ streamlit run app.py
 - Denominator decisions are stored in `denominator_settings.json` and reused later.
 - Denominator changes saved in the app are tracked in `CHANGELOG.md` and reflected in `status.md`.
 - Saving to the norms database is an explicit action on the Norm tables page after setup and review.
-- Saved norm datasets are stored locally under `norm_database/`, with one workbook per saved dataset and an aggregate `saved_norm_tables.xlsx` workbook.
+- Saved norm datasets are stored in persistent app-level storage, with one workbook per saved dataset and an aggregate `saved_norm_tables.xlsx` workbook.
+- By default, saved norms live under the app folder at `norm_database/`, so restarting Streamlit from a different working directory does not make the database look empty.
+- Set `BLS_NORMS_DATA_DIR` to an absolute shared/persistent directory when hosting the app for multiple devices or on a server with mounted persistent storage.
+- Saves and saved-rule updates use a database write lock and atomic manifest writes so overlapping browser sessions do not overwrite each other.
 - Duplicate-upload safeguards use respondent ID overlap when an ID field such as `ResponseId` is available; 80% or higher overlap is flagged as a possible duplicate.
 - If no respondent ID field is available, duplicate safeguards fall back to exact cleaned-data matching rather than file name.
 - Duplicate datasets are flagged during workbook upload with a simple Dataset already added to norms notification.
