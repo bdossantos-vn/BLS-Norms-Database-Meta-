@@ -1,0 +1,4800 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import base64
+from difflib import SequenceMatcher
+from dataclasses import dataclass
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+import re
+
+import pandas as pd
+import streamlit as st
+import streamlit.components.v1 as components
+
+
+DEFAULT_DENOMINATOR = "Total answering"
+DENOMINATOR_OPTIONS = ["Total answering", "Total sample"]
+NOT_AVAILABLE = "Not available"
+NOT_TESTED = "Not tested"
+NA_NORM_OPTION = "NA"
+SETTINGS_PATH = Path("denominator_settings.json")
+NORM_MAPPING_PATH = Path("norm_mapping_settings.json")
+BOX_SCORE_SETTINGS_PATH = Path("box_score_settings.json")
+QUESTION_TYPE_SETTINGS_PATH = Path("question_type_settings.json")
+NA_ALIAS_SETTINGS_PATH = Path("na_alias_settings.json")
+CHANGELOG_PATH = Path("CHANGELOG.md")
+STATUS_PATH = Path("status.md")
+LOGO_PATH = Path("assets") / "vn_logo.png"
+NORM_DATABASE_DIR = Path("norm_database")
+NORM_DATABASE_DATASETS_DIR = NORM_DATABASE_DIR / "datasets"
+NORM_DATABASE_MANIFEST_PATH = NORM_DATABASE_DIR / "manifest.json"
+NORM_DATABASE_WORKBOOK_PATH = NORM_DATABASE_DIR / "saved_norm_tables.xlsx"
+NORM_DATASET_RESPONDENT_SHEET = "Respondent Data"
+NORM_DATASET_RULES_SHEET = "Rules"
+NORM_DATASET_NORM_RULES_SHEET = "Norm Rules"
+NORM_DATASET_QUESTION_LABELS_SHEET = "Question Labels"
+NORM_DATASET_RESPONSE_LABELS_SHEET = "Response Labels"
+DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD = 0.8
+SIGNIFICANCE_ALPHA = 0.05
+NO_LABEL_SHEET = "No labels sheet"
+SMART_TABLES_LAYOUT = "BLS / Smart Tables layout"
+RESPONDENT_ROWS_LAYOUT = "Standard respondent table"
+DATA_LAYOUT_OPTIONS = [SMART_TABLES_LAYOUT, RESPONDENT_ROWS_LAYOUT]
+PAGE_NAMES = [
+    "Survey Question Audit",
+    "Denominators",
+    "Norm tables",
+    "Saved datasets",
+]
+QUESTION_TYPES = [
+    "Single-Select",
+    "Multi-Select",
+    "Scale / Likert",
+    "Numeric Data",
+    "Open-End Text",
+    "Ignore",
+]
+BOX_SCORE_OPTIONS = ["T2B", "T3B", "B2B", "B3B"]
+BOX_SCORE_LABELS = {
+    "T2B": "Top 2 Box",
+    "T3B": "Top 3 Box",
+    "B2B": "Bottom 2 Box",
+    "B3B": "Bottom 3 Box",
+}
+DEFAULT_VARIABLE_BLACKLIST = [
+    "StartDate",
+    "EndDate",
+    "IPAddress",
+    "RecipientEmail",
+    "RecipientFirstName",
+    "RecipientLastName",
+    "Status",
+    "Duration",
+    "Duration (in seconds)",
+    "Progress",
+    "RecordedDate",
+    "ResponseId",
+    "ResponseSet",
+    "LocationLatitude",
+    "LocationLongitude",
+    "UserLanguage",
+    "Finished",
+    "DistributionChannel",
+    "ExternalReference",
+    "Q_RecaptchaScore",
+    "Q_RecaptchaStatus",
+    "Q_RecaptchaError",
+    "Q_AmbiguousTextPresent",
+    "Q_AmbiguousTextQuestions",
+    "Q_StraightliningCount",
+    "Q_StraightliningPercentage",
+    "Q_StraightliningQuestions",
+    "Q_UnansweredPercentage",
+    "Q_UnansweredQuestions",
+]
+DEFAULT_BLACKLIST_PREFIXES = [
+    "Q_RelevantID",
+    "Q_DuplicateRespondent",
+]
+GROUP_COLUMN_CANDIDATES = [
+    "cell",
+    "group",
+    "condition",
+    "treatment",
+    "variant",
+    "segment",
+]
+PROJECT_METADATA_VARIABLES = [
+    "brand",
+    "industry",
+    "client",
+    "quarter",
+    "year",
+    "methodology",
+    "project",
+    "country",
+    "c_key",
+]
+RESPONDENT_ID_CANDIDATES = [
+    "ResponseId",
+    "Response ID",
+    "response_id",
+    "respondent_id",
+    "Respondent ID",
+    "respondentid",
+    "resp_id",
+    "respid",
+    "record_id",
+    "case_id",
+    "participant_id",
+    "panelist_id",
+    "uuid",
+    "c_key",
+]
+NORM_FILTER_FIELDS = [
+    ("Project", ["project"]),
+    ("Brand", ["brand"]),
+    ("Client", ["client"]),
+    ("Industry", ["industry"]),
+    ("Country", ["country"]),
+    ("Year", ["year"]),
+    ("Quarter", ["quarter"]),
+    ("Gender", ["gender", "sex"]),
+    ("Age", ["age"]),
+]
+EXACT_NORM_FILTERS = {"Project", "Brand", "Client", "Industry", "Country", "Year", "Quarter"}
+NORM_FILTER_SESSION_PREFIX = "norm_filter_"
+LIKERT_PATTERNS = [
+    "strongly disagree",
+    "disagree",
+    "neutral",
+    "agree",
+    "strongly agree",
+    "very dissatisfied",
+    "dissatisfied",
+    "satisfied",
+    "very satisfied",
+]
+SCALE_LABEL_HINTS = [
+    "agree or disagree",
+    "how likely",
+    "to what extent",
+    "feel about",
+    "how interested",
+    "brand affinity",
+    "brand sentiment",
+    "sentiment",
+    "interest",
+    "affinity",
+    "relationship with",
+]
+SCALE_VALUE_HINTS = [
+    "very interested",
+    "somewhat interested",
+    "moderately interested",
+    "not that interested",
+    "not very interested",
+    "not at all interested",
+    "love it",
+    "like it",
+    "neutral",
+    "dislike it",
+    "hate it",
+    "very likely",
+    "quite likely",
+    "moderately likely",
+    "not that likely",
+    "not likely",
+    "very unlikely",
+    "somewhat likely",
+    "somewhat better",
+    "about the same",
+    "much worse",
+    "much better",
+    "somewhat worse",
+    "dedicated harry potter fan",
+    "new to the series but interested",
+    "nostalgic toward it",
+    "not a fan",
+    "leads much more often",
+    "leads somewhat more often",
+    "follows somewhat more often",
+    "follows much more often",
+    "follows more often",
+]
+SCALE_ORDER_PATTERNS = [
+    ("love it", 0),
+    ("very unlikely", 4),
+    ("not at all interested", 4),
+    ("not at all likely", 4),
+    ("not very interested", 3),
+    ("not that interested", 3),
+    ("strongly disagree", 4),
+    ("dislike it", 3),
+    ("hate it", 4),
+    ("very likely", 0),
+    ("very interested", 0),
+    ("strongly agree", 0),
+    ("much better", 0),
+    ("leads much more often", 0),
+    ("quite likely", 1),
+    ("somewhat likely", 1),
+    ("somewhat interested", 1),
+    ("somewhat agree", 1),
+    ("somewhat better", 1),
+    ("like it", 1),
+    ("leads somewhat more often", 1),
+    ("about the same", 2),
+    ("neutral", 2),
+    ("moderately interested", 2),
+    ("moderately likely", 2),
+    ("neither agree nor disagree", 2),
+    ("follows somewhat more often", 2),
+    ("somewhat worse", 3),
+    ("not that likely", 3),
+    ("not likely", 3),
+    ("somewhat disagree", 3),
+    ("follows much more often", 3),
+    ("follows more often", 3),
+    ("much worse", 4),
+]
+HP_INTEREST_ORDER_PATTERNS = [
+    ("i am a dedicated harry potter fan", 0),
+    ("i enjoyed it in the past and feel nostalgic toward it", 1),
+    ("i'm new to the series but interested", 2),
+    ("i’m new to the series but interested", 2),
+    ("i'm not a fan", 3),
+    ("i’m not a fan", 3),
+]
+EXCLUSIVE_RESPONSE_PATTERNS = [
+    "none of the above",
+    "none",
+    "other",
+    "prefer not to say",
+    "don't know",
+    "dont know",
+    "unsure",
+    "not applicable",
+    "n/a",
+]
+QUESTION_COLUMN_CANDIDATES = [
+    "question",
+    "variable",
+    "column",
+    "field",
+    "field_name",
+    "question_name",
+    "name",
+]
+VALUE_COLUMN_CANDIDATES = [
+    "value",
+    "code",
+    "response_value",
+    "option_value",
+    "raw_value",
+]
+LABEL_COLUMN_CANDIDATES = [
+    "label",
+    "response_label",
+    "option_label",
+    "value_label",
+    "text",
+    "response",
+]
+QUESTION_LABEL_COLUMN_CANDIDATES = [
+    "question_label",
+    "question_text",
+    "question_title",
+    "variable_label",
+]
+
+
+@dataclass
+class RespondentSheet:
+    dataframe: pd.DataFrame
+    question_labels: dict[str, str]
+    metadata_rows_removed: int = 0
+    metadata_columns_default_na: int = 0
+    metadata_columns: list[str] | None = None
+
+
+def logo_base64() -> str:
+    if not LOGO_PATH.exists():
+        return ""
+    return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+
+
+def apply_bls_theme() -> None:
+    st.markdown(
+        """
+        <style>
+            :root {
+                --vn-black: #000000;
+                --vn-white: #ffffff;
+                --vn-red: #ff005c;
+                --vn-orange: #ff6927;
+                --vn-yellow: #ffc227;
+                --vn-gray-50: #f8f8fa;
+                --vn-gray-100: #f1f2f5;
+                --vn-gray-200: #e2e5ea;
+                --vn-gray-400: #8a8f98;
+            }
+
+            html, body, [class*="css"] {
+                font-family: "Proxima Nova", "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+            }
+
+            .stApp {
+                background: var(--vn-white);
+                color: var(--vn-black);
+                color-scheme: light;
+            }
+
+            .block-container {
+                padding-top: 1.25rem;
+                padding-bottom: 3rem;
+                max-width: 1280px;
+            }
+
+            h1, h2, h3, h4, h5, h6 {
+                color: var(--vn-black);
+                letter-spacing: 0;
+            }
+
+            [data-testid="stMain"] p,
+            [data-testid="stMain"] label,
+            [data-testid="stMain"] legend,
+            [data-testid="stMain"] span,
+            [data-testid="stMain"] div[data-testid="stMarkdownContainer"] * {
+                color: var(--vn-black);
+            }
+
+            .vn-brand-bar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 1rem;
+                padding: 0.9rem 1rem;
+                margin: 0 0 1.25rem 0;
+                background: linear-gradient(90deg, #050505 0%, #151515 72%, var(--vn-red) 100%);
+                border-radius: 8px;
+                box-shadow: 0 10px 26px rgba(0, 0, 0, 0.12);
+            }
+
+            .vn-brand-left {
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                min-width: 0;
+            }
+
+            .vn-brand-copy {
+                display: flex;
+                flex-direction: column;
+                gap: 0.1rem;
+                min-width: 0;
+            }
+
+            .vn-brand-kicker {
+                color: rgba(255, 255, 255, 0.72) !important;
+                font-size: 0.78rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+            }
+
+            .vn-brand-title {
+                color: var(--vn-white) !important;
+                font-size: 1.28rem;
+                font-weight: 800;
+                line-height: 1.15;
+            }
+
+            .vn-brand-subtitle {
+                color: rgba(255, 255, 255, 0.82) !important;
+                font-size: 0.9rem;
+                line-height: 1.25;
+                text-align: right;
+            }
+
+            .stTabs [data-baseweb="tab-list"] {
+                gap: 0.45rem;
+                border-bottom: 1px solid var(--vn-gray-200);
+            }
+
+            .stTabs [data-baseweb="tab"] {
+                border-radius: 8px 8px 0 0;
+                padding: 0.55rem 0.9rem;
+                color: var(--vn-black);
+            }
+
+            .stTabs [aria-selected="true"] {
+                background: var(--vn-black);
+            }
+
+            .stTabs [aria-selected="true"] * {
+                color: var(--vn-white) !important;
+            }
+
+            .stButton > button,
+            .stDownloadButton > button,
+            [data-testid="stPopover"] button {
+                border-radius: 8px;
+                border: 1px solid var(--vn-red);
+                color: var(--vn-white) !important;
+                background: var(--vn-red);
+                font-weight: 700;
+                transition: all 0.16s ease;
+            }
+
+            .stButton > button:hover,
+            .stDownloadButton > button:hover,
+            [data-testid="stPopover"] button:hover {
+                border-color: var(--vn-red);
+                color: var(--vn-white);
+                background: linear-gradient(90deg, var(--vn-red) 0%, var(--vn-orange) 100%);
+            }
+
+            .stButton > button *,
+            .stDownloadButton > button *,
+            [data-testid="stPopover"] button * {
+                color: var(--vn-white) !important;
+                fill: var(--vn-white) !important;
+            }
+
+            .stButton > button:disabled,
+            .stDownloadButton > button:disabled,
+            [data-testid="stPopover"] button:disabled {
+                background: var(--vn-gray-400) !important;
+                border-color: var(--vn-gray-400) !important;
+                color: var(--vn-white) !important;
+                opacity: 0.65;
+            }
+
+            [data-testid="stMetric"] {
+                background: var(--vn-white) !important;
+                border: 1px solid var(--vn-gray-200);
+                border-radius: 8px;
+                padding: 0.9rem 1rem 0.75rem 1rem;
+                box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05);
+            }
+
+            [data-testid="stMetric"] * {
+                color: var(--vn-black) !important;
+            }
+
+            [data-testid="stAlert"],
+            [data-testid="stExpander"] details,
+            details {
+                border-radius: 8px !important;
+                border-color: var(--vn-gray-200) !important;
+            }
+
+            [data-testid="stMain"] div[data-baseweb="select"] > div,
+            [data-testid="stMain"] div[data-baseweb="input"] > div,
+            [data-testid="stMain"] textarea,
+            [data-testid="stMain"] input {
+                border-radius: 8px !important;
+                background: var(--vn-white) !important;
+                color: var(--vn-black) !important;
+            }
+
+            [data-testid="stMain"] div[data-baseweb="select"] *,
+            [data-testid="stMain"] div[data-baseweb="input"] *,
+            [data-testid="stMain"] [data-baseweb="radio"] *,
+            [data-testid="stMain"] [data-baseweb="checkbox"] * {
+                color: var(--vn-black) !important;
+                fill: var(--vn-black) !important;
+            }
+
+            [data-testid="stMain"] [data-testid="stFileUploader"] section,
+            [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] {
+                background: var(--vn-white) !important;
+                border: 1px solid var(--vn-gray-200) !important;
+                border-radius: 8px !important;
+            }
+
+            [data-testid="stMain"] [data-testid="stFileUploader"] section *,
+            [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] * {
+                color: var(--vn-black) !important;
+                fill: var(--vn-black) !important;
+            }
+
+            [data-testid="stDataFrame"],
+            [data-testid="stDataFrameGlideDataEditor"],
+            [data-testid="stDataEditor"],
+            [data-testid*="GlideDataEditor"] {
+                --gdg-bg-cell: var(--vn-white) !important;
+                --gdg-bg-cell-medium: var(--vn-white) !important;
+                --gdg-bg-header: var(--vn-gray-50) !important;
+                --gdg-bg-header-has-focus: var(--vn-gray-50) !important;
+                --gdg-bg-header-hovered: var(--vn-gray-100) !important;
+                --gdg-text-dark: var(--vn-black) !important;
+                --gdg-text-medium: #333333 !important;
+                --gdg-text-light: #666666 !important;
+                --gdg-text-header: var(--vn-black) !important;
+                --gdg-border-color: var(--vn-gray-200) !important;
+                --gdg-horizontal-border-color: var(--vn-gray-200) !important;
+                --gdg-accent-color: var(--vn-red) !important;
+                --gdg-accent-fg: var(--vn-white) !important;
+                color-scheme: light !important;
+                background: var(--vn-white) !important;
+                color: var(--vn-black) !important;
+            }
+
+            .vn-norm-table-wrap {
+                width: 100%;
+                overflow-x: auto;
+                margin: 0.45rem 0 1.45rem 0;
+                border: 1px solid var(--vn-gray-200);
+                border-radius: 8px;
+                background: var(--vn-white);
+            }
+
+            .vn-norm-table {
+                width: 100%;
+                border-collapse: collapse;
+                background: var(--vn-white) !important;
+                color: var(--vn-black) !important;
+                font-size: 0.92rem;
+            }
+
+            .vn-norm-table thead th {
+                background: var(--vn-gray-50) !important;
+                color: var(--vn-black) !important;
+                border-bottom: 1px solid var(--vn-gray-200);
+                font-weight: 800;
+                padding: 0.7rem 0.8rem;
+                text-align: left;
+                white-space: nowrap;
+            }
+
+            .vn-norm-table tbody td {
+                background: var(--vn-white) !important;
+                color: var(--vn-black) !important;
+                border-bottom: 1px solid var(--vn-gray-200);
+                padding: 0.65rem 0.8rem;
+                vertical-align: top;
+            }
+
+            .vn-norm-table tbody tr:last-child td {
+                border-bottom: 0;
+            }
+
+            .vn-norm-table tbody tr:nth-child(even) td {
+                background: var(--vn-gray-50) !important;
+            }
+
+            [data-testid="stCaptionContainer"],
+            [data-testid="stCaptionContainer"] * {
+                color: var(--vn-gray-400) !important;
+            }
+
+            @media (max-width: 720px) {
+                .vn-brand-bar {
+                    align-items: flex-start;
+                    flex-direction: column;
+                }
+
+                .vn-brand-subtitle {
+                    text-align: left;
+                }
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_bls_header() -> None:
+    logo_html = ""
+    encoded_logo = logo_base64()
+    if encoded_logo:
+        logo_html = (
+            f'<img src="data:image/png;base64,{encoded_logo}" '
+            'style="height:42px; width:auto; display:block;" alt="Viral Nation logo" />'
+        )
+
+    st.markdown(
+        f"""
+        <div class="vn-brand-bar">
+            <div class="vn-brand-left">
+                {logo_html}
+                <div class="vn-brand-copy">
+                    <div class="vn-brand-kicker">Viral Nation</div>
+                    <div class="vn-brand-title">BLS Norms Database</div>
+                </div>
+            </div>
+            <div class="vn-brand-subtitle">Brand Lift Study Norms</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_page_navigation(page_index: int, review_mode: bool = False) -> None:
+    page_sequence = [2, 3] if review_mode else list(range(len(PAGE_NAMES)))
+    if page_index in page_sequence:
+        sequence_position = page_sequence.index(page_index)
+        previous_index = page_sequence[sequence_position - 1] if sequence_position > 0 else -1
+        next_index = (
+            page_sequence[sequence_position + 1]
+            if sequence_position < len(page_sequence) - 1
+            else len(PAGE_NAMES)
+        )
+    else:
+        previous_index = -1
+        next_index = page_sequence[0]
+
+    previous_label = PAGE_NAMES[previous_index] if previous_index >= 0 else ""
+    next_label = PAGE_NAMES[next_index] if next_index < len(PAGE_NAMES) else ""
+    previous_disabled = "disabled" if previous_index < 0 else ""
+    next_disabled = "disabled" if next_index >= len(PAGE_NAMES) else ""
+    previous_button = (
+        f"""
+            <button class="vn-page-nav-back" type="button" {previous_disabled} onclick="goToTab({previous_index})">
+                Back{': ' + previous_label if previous_label else ''}
+            </button>
+        """
+        if not previous_disabled
+        else ""
+    )
+    next_button = (
+        f"""
+            <button class="vn-page-nav-next" type="button" {next_disabled} onclick="goToTab({next_index})">
+                Next{': ' + next_label if next_label else ''}
+            </button>
+        """
+        if not next_disabled
+        else ""
+    )
+
+    components.html(
+        f"""
+        <style>
+            .vn-page-nav {{
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                justify-content: space-between;
+                width: 100%;
+                box-sizing: border-box;
+                padding: 2px 0 8px 0;
+                font-family: "Proxima Nova", "Avenir Next", "Segoe UI", Arial, sans-serif;
+            }}
+
+            .vn-page-nav button {{
+                appearance: none;
+                border: 1px solid #ff005c;
+                border-radius: 8px;
+                background: #ff005c;
+                color: #ffffff;
+                font-weight: 800;
+                font-size: 14px;
+                line-height: 1.2;
+                padding: 12px 16px;
+                min-width: 190px;
+                cursor: pointer;
+            }}
+
+            .vn-page-nav button:hover:not(:disabled) {{
+                background: linear-gradient(90deg, #ff005c 0%, #ff6927 100%);
+            }}
+
+            .vn-page-nav button:disabled {{
+                background: #8a8f98;
+                border-color: #8a8f98;
+                cursor: not-allowed;
+                opacity: 0.65;
+            }}
+
+            .vn-page-nav-next {{
+                margin-left: auto;
+            }}
+
+            @media (max-width: 720px) {{
+                .vn-page-nav {{
+                    flex-direction: column;
+                }}
+
+                .vn-page-nav button {{
+                    width: 100%;
+                }}
+            }}
+        </style>
+        <div class="vn-page-nav">
+            {previous_button}
+            {next_button}
+        </div>
+        <script>
+            function goToTab(index) {{
+                const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+                if (tabs[index]) {{
+                    tabs[index].click();
+                    tabs[index].scrollIntoView({{ block: 'center', inline: 'nearest' }});
+                }}
+            }}
+        </script>
+        """,
+        height=62,
+    )
+
+
+def load_denominator_settings() -> dict[str, str]:
+    if not SETTINGS_PATH.exists():
+        return {}
+
+    try:
+        data = json.loads(SETTINGS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    return {
+        question: setting
+        for question, setting in data.items()
+        if setting in DENOMINATOR_OPTIONS
+    }
+
+
+def save_denominator_settings(settings: dict[str, str]) -> None:
+    SETTINGS_PATH.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n")
+
+
+def load_norm_mapping_settings() -> dict[str, str]:
+    if not NORM_MAPPING_PATH.exists():
+        return {}
+
+    try:
+        data = json.loads(NORM_MAPPING_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    return {
+        normalize_answer(source) or str(source): normalize_answer(target) or NA_NORM_OPTION
+        for source, target in data.items()
+    }
+
+
+def save_norm_mapping_settings(settings: dict[str, str]) -> None:
+    NORM_MAPPING_PATH.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n")
+
+
+def load_box_score_settings() -> dict[str, list[str]]:
+    if not BOX_SCORE_SETTINGS_PATH.exists():
+        return {}
+
+    try:
+        data = json.loads(BOX_SCORE_SETTINGS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    settings: dict[str, list[str]] = {}
+    for question, selected_scores in data.items():
+        if not isinstance(selected_scores, list):
+            continue
+        normalized_question = normalize_answer(question)
+        if not normalized_question:
+            continue
+        settings[normalized_question] = [
+            score
+            for score in selected_scores
+            if score in BOX_SCORE_OPTIONS
+        ]
+
+    return settings
+
+
+def save_box_score_settings(settings: dict[str, list[str]]) -> None:
+    clean_settings = {
+        question: [
+            score
+            for score in scores
+            if score in BOX_SCORE_OPTIONS
+        ]
+        for question, scores in settings.items()
+    }
+    BOX_SCORE_SETTINGS_PATH.write_text(json.dumps(clean_settings, indent=2, sort_keys=True) + "\n")
+
+
+def load_question_type_settings() -> dict[str, str]:
+    if not QUESTION_TYPE_SETTINGS_PATH.exists():
+        return {}
+
+    try:
+        data = json.loads(QUESTION_TYPE_SETTINGS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    settings: dict[str, str] = {}
+    for question, question_type in data.items():
+        normalized_question = normalize_answer(question)
+        normalized_type = normalize_answer(question_type)
+        if normalized_question and normalized_type in QUESTION_TYPES:
+            settings[normalized_question] = normalized_type
+
+    return settings
+
+
+def save_question_type_settings(settings: dict[str, str]) -> None:
+    clean_settings = {
+        question: question_type
+        for question, question_type in settings.items()
+        if question_type in QUESTION_TYPES
+    }
+    QUESTION_TYPE_SETTINGS_PATH.write_text(json.dumps(clean_settings, indent=2, sort_keys=True) + "\n")
+
+
+def load_na_alias_settings() -> set[str]:
+    if not NA_ALIAS_SETTINGS_PATH.exists():
+        return set()
+
+    try:
+        data = json.loads(NA_ALIAS_SETTINGS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+    if not isinstance(data, list):
+        return set()
+
+    return {
+        alias
+        for alias in (normalize_alias_key(value) for value in data)
+        if alias
+    }
+
+
+def save_na_alias_settings(alias_keys: set[str]) -> None:
+    clean_aliases = sorted(alias for alias in alias_keys if alias)
+    NA_ALIAS_SETTINGS_PATH.write_text(json.dumps(clean_aliases, indent=2) + "\n")
+
+
+def merge_na_alias_settings(alias_keys: set[str]) -> set[str]:
+    merged_aliases = load_na_alias_settings() | alias_keys
+    save_na_alias_settings(merged_aliases)
+    return merged_aliases
+
+
+def setting_key(question: str) -> str:
+    digest = hashlib.sha1(question.encode("utf-8")).hexdigest()[:12]
+    return f"denominator_{digest}"
+
+
+def normalize_answer(value) -> str | None:
+    if pd.isna(value):
+        return None
+
+    if isinstance(value, int):
+        return str(value)
+
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+
+    answer = str(value).strip()
+    if re.fullmatch(r"-?\d+\.0", answer):
+        return answer[:-2]
+
+    return answer or None
+
+
+def split_answers(value, split_multi_select: bool, delimiter: str) -> list[str]:
+    answer = normalize_answer(value)
+    if answer is None:
+        return []
+
+    if not split_multi_select or not delimiter:
+        return [answer]
+
+    options = [option.strip() for option in answer.split(delimiter)]
+    return list(dict.fromkeys(option for option in options if option))
+
+
+def bls_response_parts(value, extra_delimiter: str = "") -> list[str]:
+    normalized_value = normalize_answer(value)
+    if normalized_value is None:
+        return []
+
+    delimiters = [";", ","]
+    if extra_delimiter and extra_delimiter not in delimiters:
+        delimiters.append(extra_delimiter)
+
+    split_pattern = "|".join(re.escape(delimiter) for delimiter in delimiters)
+    choices: list[str] = []
+    for part in re.split(split_pattern, normalized_value):
+        normalized_part = normalize_answer(part)
+        if normalized_part and normalized_part not in choices:
+            choices.append(normalized_part)
+
+    return choices or [normalized_value]
+
+
+def value_matches_response_option(value, response_option: str, extra_delimiter: str = "") -> bool:
+    normalized_value = normalize_answer(value)
+    normalized_option = normalize_answer(response_option)
+    if normalized_value is None or normalized_option is None:
+        return False
+    if normalized_value == normalized_option:
+        return True
+    return normalized_option in bls_response_parts(normalized_value, extra_delimiter)
+
+
+def infer_multi_select(series: pd.Series) -> bool:
+    values = series.dropna().map(normalize_answer).dropna()
+    if values.empty:
+        return False
+    delimiter_ratio = values.map(lambda value: bool(re.search(r"[;,]", value))).mean()
+    return float(delimiter_ratio) >= 0.3
+
+
+def extract_observed_response_options(
+    series: pd.Series,
+    split_multi_select: bool,
+    delimiter: str,
+) -> list[str]:
+    choices: list[str] = []
+    should_split = split_multi_select or infer_multi_select(series)
+
+    for value in series.dropna().tolist():
+        if should_split:
+            parts = bls_response_parts(value, delimiter if split_multi_select else "")
+        else:
+            normalized = normalize_answer(value)
+            parts = [normalized] if normalized else []
+
+        for part in parts:
+            if part not in choices:
+                choices.append(part)
+
+    return choices
+
+
+def has_answer(value) -> bool:
+    return normalize_answer(value) is not None
+
+
+def denominator_for(group_df: pd.DataFrame, question: str, denominator_setting: str) -> int | None:
+    if question not in group_df.columns:
+        return None
+
+    if denominator_setting == "Total sample":
+        return len(group_df)
+
+    if denominator_setting == "Total answering":
+        return int(group_df[question].map(has_answer).sum())
+
+    return None
+
+
+def response_counts(
+    group_df: pd.DataFrame,
+    question: str,
+    split_multi_select: bool,
+    delimiter: str,
+    response_options: list[str] | None = None,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+
+    if question not in group_df.columns:
+        return counts
+
+    if response_options is not None:
+        for option in response_options:
+            counts[option] = int(
+                group_df[question]
+                .map(lambda value: value_matches_response_option(value, option, delimiter))
+                .sum()
+            )
+        return counts
+
+    for value in group_df[question]:
+        for option in split_answers(value, split_multi_select, delimiter):
+            counts[option] = counts.get(option, 0) + 1
+
+    return counts
+
+
+def option_order(*count_maps: dict[str, int]) -> list[str]:
+    seen: dict[str, None] = {}
+    for counts in count_maps:
+        for option in counts:
+            seen.setdefault(option, None)
+    return list(seen.keys())
+
+
+def normalize_sort_text(value) -> str:
+    normalized = normalize_answer(value) or ""
+    return re.sub(r"\s+", " ", normalized.lower()).strip()
+
+
+def contains_phrase(normalized: str, phrase: str) -> bool:
+    return re.search(rf"(?<![a-z]){re.escape(phrase)}(?![a-z])", normalized) is not None
+
+
+def is_exclusive_response_label(value) -> bool:
+    normalized = normalize_sort_text(value)
+    return any(pattern in normalized for pattern in EXCLUSIVE_RESPONSE_PATTERNS)
+
+
+def count_pattern_hits(values: list[str], patterns: list[str]) -> int:
+    return sum(any(pattern in value for pattern in patterns) for value in values)
+
+
+def scale_choice_score(choice: str) -> tuple[int, int] | None:
+    normalized = normalize_sort_text(choice)
+
+    if contains_phrase(normalized, "leads much more often"):
+        return (0, 0)
+    if contains_phrase(normalized, "leads somewhat more often"):
+        return (1, 0)
+    if contains_phrase(normalized, "follows somewhat more often"):
+        return (3, 0)
+    if contains_phrase(normalized, "follows much more often") or contains_phrase(normalized, "follows more often"):
+        return (4, 0)
+
+    if contains_phrase(normalized, "i am a dedicated harry potter fan"):
+        return (0, 0)
+    if contains_phrase(normalized, "feel nostalgic toward it"):
+        return (1, 0)
+    if contains_phrase(normalized, "new to the series but interested"):
+        return (2, 0)
+    if contains_phrase(normalized, "not a fan"):
+        return (4, 0)
+
+    if contains_phrase(normalized, "love it"):
+        return (0, 0)
+    if contains_phrase(normalized, "dislike it"):
+        return (3, 0)
+    if contains_phrase(normalized, "hate it"):
+        return (4, 0)
+    if contains_phrase(normalized, "like it"):
+        return (1, 0)
+    if (
+        contains_phrase(normalized, "neutral")
+        or contains_phrase(normalized, "about the same")
+        or contains_phrase(normalized, "neither agree nor disagree")
+    ):
+        return (2, 0)
+
+    if contains_phrase(normalized, "much better"):
+        return (0, 0)
+    if contains_phrase(normalized, "somewhat better"):
+        return (1, 0)
+    if contains_phrase(normalized, "somewhat worse"):
+        return (3, 0)
+    if contains_phrase(normalized, "much worse"):
+        return (4, 0)
+
+    if contains_phrase(normalized, "strongly agree"):
+        return (0, 0)
+    if contains_phrase(normalized, "somewhat agree"):
+        return (1, 0)
+    if contains_phrase(normalized, "somewhat disagree"):
+        return (3, 0)
+    if contains_phrase(normalized, "strongly disagree"):
+        return (4, 0)
+
+    positive_weight = None
+    if "not at all " in normalized or "very unlikely" in normalized:
+        positive_weight = 4
+    elif "not that " in normalized or "not very " in normalized or "not likely" in normalized:
+        positive_weight = 3
+    elif "very " in normalized:
+        positive_weight = 0
+    elif "quite " in normalized:
+        positive_weight = 1
+    elif "somewhat " in normalized:
+        positive_weight = 1
+    elif "moderately " in normalized:
+        positive_weight = 2
+
+    if positive_weight is not None and any(token in normalized for token in ["interested", "likely"]):
+        return (positive_weight, 1)
+
+    for pattern, score in SCALE_ORDER_PATTERNS:
+        if pattern in normalized:
+            return (score, 9)
+
+    return None
+
+
+def count_scored_scale_hits(choices: list[str]) -> int:
+    return sum(1 for choice in choices if scale_choice_score(choice) is not None)
+
+
+def count_hp_interest_hits(choices: list[str]) -> int:
+    hits = 0
+    for choice in choices:
+        normalized = normalize_sort_text(choice)
+        if any(pattern in normalized for pattern, _ in HP_INTEREST_ORDER_PATTERNS):
+            hits += 1
+    return hits
+
+
+def age_bucket_key(choice: str) -> tuple[int, int] | None:
+    normalized = normalize_sort_text(choice)
+
+    under_match = re.search(r"under\s+(\d+)", normalized)
+    if under_match:
+        return (0, int(under_match.group(1)))
+
+    plus_match = re.search(r"(\d+)\s*\+", normalized)
+    if plus_match:
+        return (int(plus_match.group(1)), 999)
+
+    range_match = re.search(r"(\d+)\s*-\s*(\d+)", normalized)
+    if range_match:
+        return (int(range_match.group(1)), int(range_match.group(2)))
+
+    return None
+
+
+def is_scale_answer_set(display_labels: list[str], question_label: str) -> bool:
+    values = [
+        normalize_sort_text(label)
+        for label in display_labels
+        if normalize_sort_text(label) and not is_exclusive_response_label(label)
+    ]
+    if not values:
+        return False
+
+    unique_values = list(dict.fromkeys(values))
+    if len(unique_values) > 11:
+        return False
+
+    label_lower = normalize_sort_text(question_label)
+    if any(token in label_lower for token in SCALE_LABEL_HINTS) and len(unique_values) <= 7:
+        return True
+
+    if count_pattern_hits(unique_values, LIKERT_PATTERNS) >= 2:
+        return True
+
+    if count_pattern_hits(unique_values, SCALE_VALUE_HINTS) >= 2 and len(unique_values) <= 7:
+        return True
+
+    scored_scale_hits = count_scored_scale_hits(unique_values)
+    if scored_scale_hits >= max(3, len(unique_values) - 1) and len(unique_values) <= 7:
+        return True
+
+    if len(unique_values) in {4, 5} and scored_scale_hits >= 3:
+        return True
+
+    return False
+
+
+def is_numeric_series(series: pd.Series) -> bool:
+    coerced = pd.to_numeric(series, errors="coerce")
+    non_null_ratio = coerced.notna().mean()
+    unique_values = coerced.dropna().nunique()
+    return float(non_null_ratio) >= 0.8 and int(unique_values) >= 8
+
+
+def is_open_text_series(series: pd.Series) -> bool:
+    values = series.dropna().map(normalize_answer).dropna()
+    if values.empty:
+        return False
+    unique_ratio = values.nunique() / max(len(values), 1)
+    avg_length = values.map(len).mean()
+    return float(unique_ratio) >= 0.5 and float(avg_length) >= 15
+
+
+def guess_question_type(
+    df: pd.DataFrame,
+    question: str,
+    question_labels: dict[str, str],
+    response_labels: dict[str, dict[str, str]],
+    split_multi_select: bool,
+    delimiter: str,
+) -> str:
+    if is_default_na_metadata_variable(question) or is_project_metadata_variable(question):
+        return "Ignore"
+
+    if question not in df.columns:
+        return "Single-Select"
+
+    question_label = display_question_label(question, question_labels)
+    label_lower = normalize_sort_text(question_label)
+    series = df[question]
+
+    if "select all that apply" in label_lower or infer_multi_select(series):
+        return "Multi-Select"
+
+    options: list[str] = []
+    for option in response_labels.get(question, {}):
+        if option not in options:
+            options.append(option)
+    for option in extract_observed_response_options(series, split_multi_select, delimiter):
+        if option not in options:
+            options.append(option)
+
+    display_labels = [
+        display_response_label(question, option, response_labels)
+        for option in options
+    ]
+    if is_scale_answer_set(display_labels, question_label):
+        return "Scale / Likert"
+
+    unique_values = [
+        normalize_answer(value)
+        for value in series.dropna().tolist()
+        if normalize_answer(value)
+    ]
+    unique_values = list(dict.fromkeys(unique_values))
+    numeric_like = pd.to_numeric(pd.Series(unique_values), errors="coerce")
+    if numeric_like.notna().all() and 0 < len(unique_values) <= 10:
+        return "Scale / Likert"
+
+    if is_numeric_series(series):
+        return "Numeric Data"
+
+    if is_open_text_series(series):
+        return "Open-End Text"
+
+    return "Single-Select"
+
+
+def normalize_question_type(value) -> str:
+    question_type = normalize_answer(value)
+    return question_type if question_type in QUESTION_TYPES else "Single-Select"
+
+
+def sort_options_by_score(
+    options: list[str],
+    label_lookup: dict[str, str],
+    score_function,
+) -> list[str]:
+    scored: list[tuple[object, int, str]] = []
+    unmatched: list[tuple[int, str]] = []
+
+    for index, option in enumerate(options):
+        matched_score = score_function(label_lookup.get(option, option))
+        if matched_score is None:
+            unmatched.append((index, option))
+        else:
+            scored.append((matched_score, index, option))
+
+    if not scored:
+        return options
+
+    ordered = [option for _, _, option in sorted(scored, key=lambda item: (item[0], item[1]))]
+    ordered.extend(option for _, option in unmatched)
+    return ordered
+
+
+def sort_options_by_patterns(
+    options: list[str],
+    label_lookup: dict[str, str],
+    ordered_patterns: list[tuple[str, int]],
+) -> list[str]:
+    def pattern_score(label: str) -> int | None:
+        normalized = normalize_sort_text(label)
+        for pattern, score in ordered_patterns:
+            if pattern in normalized:
+                return score
+        return None
+
+    return sort_options_by_score(options, label_lookup, pattern_score)
+
+
+def anchor_exclusive_options_last(
+    options: list[str],
+    label_lookup: dict[str, str],
+) -> list[str]:
+    regular_options: list[str] = []
+    exclusive_options: list[str] = []
+
+    for option in options:
+        label = label_lookup.get(option, option)
+        if is_exclusive_response_label(label):
+            exclusive_options.append(option)
+        else:
+            regular_options.append(option)
+
+    return regular_options + exclusive_options
+
+
+def sort_response_options(
+    question: str,
+    options: list[str],
+    question_labels: dict[str, str],
+    response_labels: dict[str, dict[str, str]],
+    question_type: str | None = None,
+) -> list[str]:
+    if not options:
+        return []
+
+    question_type = normalize_question_type(question_type)
+    question_label = display_question_label(question, question_labels)
+    label_lookup = {
+        option: display_response_label(question, option, response_labels)
+        for option in options
+    }
+    display_labels = [label_lookup[option] for option in options]
+
+    age_hits = sum(age_bucket_key(label) is not None for label in display_labels)
+    if "age" in normalize_sort_text(question_label) or age_hits >= max(2, len(options) // 2):
+        return anchor_exclusive_options_last(
+            sort_options_by_score(options, label_lookup, age_bucket_key),
+            label_lookup,
+        )
+
+    if (
+        "relationship with the harry potter series" in normalize_sort_text(question_label)
+        or count_hp_interest_hits(display_labels) >= 2
+    ):
+        return anchor_exclusive_options_last(
+            sort_options_by_patterns(options, label_lookup, HP_INTEREST_ORDER_PATTERNS),
+            label_lookup,
+        )
+
+    if question_type == "Scale / Likert" or is_scale_answer_set(display_labels, question_label):
+        return anchor_exclusive_options_last(
+            sort_options_by_score(options, label_lookup, scale_choice_score),
+            label_lookup,
+        )
+
+    return anchor_exclusive_options_last(options, label_lookup)
+
+
+def response_options_for_question(
+    df: pd.DataFrame,
+    question: str,
+    response_labels: dict[str, dict[str, str]],
+    split_multi_select: bool,
+    delimiter: str,
+    question_labels: dict[str, str] | None = None,
+    question_type: str | None = None,
+) -> list[str]:
+    options: list[str] = []
+    question_labels = question_labels or {}
+    question_type = normalize_question_type(question_type)
+
+    for option in response_labels.get(question, {}):
+        if option not in options:
+            options.append(option)
+
+    if question in df.columns:
+        for option in extract_observed_response_options(
+            df[question],
+            split_multi_select,
+            delimiter,
+        ):
+            if option not in options:
+                options.append(option)
+
+    if question_type in {"Numeric Data", "Open-End Text", "Ignore"}:
+        return []
+
+    return sort_response_options(question, options, question_labels, response_labels, question_type)
+
+
+def box_score_base_options(
+    question: str,
+    options: list[str],
+    response_labels: dict[str, dict[str, str]],
+) -> list[str]:
+    return [
+        option
+        for option in options
+        if not is_exclusive_response_label(
+            display_response_label(question, option, response_labels)
+        )
+    ]
+
+
+def apply_scale_box_score_selection(
+    audit_frame: pd.DataFrame,
+    selected_scores: list[str],
+) -> pd.DataFrame:
+    if audit_frame.empty or "Question Type" not in audit_frame.columns:
+        return audit_frame
+
+    updated_frame = audit_frame.copy()
+    selected_lookup = {
+        score
+        for score in selected_scores
+        if score in BOX_SCORE_OPTIONS
+    }
+    scale_mask = updated_frame["Question Type"].map(normalize_question_type) == "Scale / Likert"
+    if "NA" in updated_frame.columns:
+        scale_mask = scale_mask & ~updated_frame["NA"].astype(bool)
+
+    for score in BOX_SCORE_OPTIONS:
+        updated_frame.loc[scale_mask, score] = score in selected_lookup
+
+    return updated_frame
+
+
+def selected_box_score_options(box_score: str, base_options: list[str]) -> list[str]:
+    if box_score == "T2B" and len(base_options) >= 2:
+        return base_options[:2]
+    if box_score == "T3B" and len(base_options) >= 3:
+        return base_options[:3]
+    if box_score == "B2B" and len(base_options) >= 2:
+        return base_options[-2:]
+    if box_score == "B3B" and len(base_options) >= 3:
+        return base_options[-3:]
+    return []
+
+
+def box_score_response_label(
+    question: str,
+    box_score: str,
+    selected_options: list[str],
+    response_labels: dict[str, dict[str, str]],
+) -> str:
+    label = BOX_SCORE_LABELS.get(box_score, box_score)
+    if not selected_options:
+        return f"{label} ({NOT_AVAILABLE})"
+
+    selected_labels = [
+        display_response_label(question, option, response_labels)
+        for option in selected_options
+    ]
+    return f"{label}: {' + '.join(selected_labels)}"
+
+
+def box_score_count(
+    group_df: pd.DataFrame,
+    question: str,
+    selected_options: list[str],
+    delimiter: str,
+) -> int:
+    if question not in group_df.columns or not selected_options:
+        return 0
+
+    return int(
+        group_df[question]
+        .map(
+            lambda value: any(
+                value_matches_response_option(value, option, delimiter)
+                for option in selected_options
+            )
+        )
+        .sum()
+    )
+
+
+def box_scores_from_text(*values) -> list[str]:
+    selected_scores: list[str] = []
+    normalized_values = [
+        re.sub(r"[^A-Z0-9]+", " ", (normalize_answer(value) or "").upper()).strip()
+        for value in values
+    ]
+    combined_normalized = " ".join(value for value in normalized_values if value)
+
+    for score in BOX_SCORE_OPTIONS:
+        score_words = f"{score[0]} {score[1]} {score[2]}"
+        score_found = False
+        for normalized in normalized_values:
+            normalized_compact = normalized.replace(" ", "")
+            if (
+                re.search(rf"(?<![A-Z0-9]){score}(?![A-Z0-9])", normalized)
+                or re.search(rf"(?<![A-Z0-9]){score}(?![A-Z0-9])", normalized_compact)
+                or normalized_compact.startswith(score)
+                or normalized_compact.endswith(score)
+                or re.search(rf"(?<![A-Z0-9]){score_words}(?![A-Z0-9])", normalized)
+            ):
+                score_found = True
+                break
+
+        if score_found:
+            selected_scores.append(score)
+
+    phrase_patterns = {
+        "T2B": ["TOP 2 BOX", "TOP TWO BOX"],
+        "T3B": ["TOP 3 BOX", "TOP THREE BOX"],
+        "B2B": ["BOTTOM 2 BOX", "BOTTOM TWO BOX"],
+        "B3B": ["BOTTOM 3 BOX", "BOTTOM THREE BOX"],
+    }
+    for score, phrases in phrase_patterns.items():
+        if score in selected_scores:
+            continue
+        if any(phrase in combined_normalized for phrase in phrases):
+            selected_scores.append(score)
+
+    return selected_scores
+
+
+def normalize_box_score_list(value) -> list[str]:
+    if isinstance(value, str):
+        raw_scores = re.split(r"[;,]", value)
+    elif isinstance(value, (list, tuple, set)):
+        raw_scores = value
+    else:
+        raw_scores = []
+
+    selected_scores: list[str] = []
+    for raw_score in raw_scores:
+        score = normalize_answer(raw_score)
+        if score in BOX_SCORE_OPTIONS and score not in selected_scores:
+            selected_scores.append(score)
+    return selected_scores
+
+
+def box_score_display(scores: list[str] | tuple[str, ...]) -> str:
+    return ", ".join(scores) if scores else "Full scale"
+
+
+def norm_rule_is_included(rule: dict) -> bool:
+    include_value = rule.get("Include", True)
+    if isinstance(include_value, bool):
+        return include_value
+    normalized_value = normalize_answer(include_value)
+    return (normalized_value or "").lower() not in {"false", "0", "no", "n"}
+
+
+def load_saved_norm_rule_history() -> list[dict]:
+    records = sorted(
+        load_norm_database_manifest(),
+        key=lambda record: normalize_answer(record.get("saved_at")) or "",
+        reverse=True,
+    )
+    rule_history: list[dict] = []
+
+    for record in records:
+        dataset_id = normalize_answer(record.get("dataset_id"))
+        if not dataset_id:
+            continue
+
+        dataset_path = norm_database_dataset_path(dataset_id)
+        if not dataset_path.exists():
+            continue
+
+        rules = read_norm_dataset_rules(dataset_path)
+        if not rules:
+            continue
+
+        question_labels = rules.get("question_labels", {})
+        for rule in rules.get("norm_rules", []):
+            source_variable = normalize_answer(rule.get("Source variable"))
+            norm = normalize_answer(rule.get("Norm / benchmark")) or source_variable
+            if (
+                not source_variable
+                or not norm
+                or norm == NA_NORM_OPTION
+                or not norm_rule_is_included(rule)
+            ):
+                continue
+
+            question_label = (
+                normalize_answer(question_labels.get(source_variable))
+                or source_variable
+            )
+            rule_history.append(
+                {
+                    "Dataset ID": dataset_id,
+                    "Saved at": record.get("saved_at", NOT_AVAILABLE),
+                    "Uploaded file": record.get("uploaded_file", NOT_AVAILABLE),
+                    "Source variable": source_variable,
+                    "Question Text": question_label,
+                    "Norm / benchmark": norm,
+                    "Question Type": normalize_question_type(rule.get("Question Type")),
+                    "Box scores": normalize_box_score_list(rule.get("Box scores")),
+                    "_source_key": normalize_alias_key(source_variable),
+                    "_question_text_key": normalize_alias_key(question_label),
+                    "_norm_key": normalize_alias_key(norm),
+                }
+            )
+
+    return rule_history
+
+
+def prior_norm_rule_match_priority(
+    prior_rule: dict,
+    question: str,
+    question_label: str,
+    selected_norm: str,
+) -> tuple[int, str] | None:
+    question_key = normalize_alias_key(question)
+    question_label_key = normalize_alias_key(question_label)
+    selected_norm_key = normalize_alias_key(selected_norm)
+
+    if question_key and question_key == prior_rule.get("_source_key"):
+        return 0, "Source variable"
+    if question_label_key and question_label_key == prior_rule.get("_question_text_key"):
+        return 1, "Question text"
+    if selected_norm_key and selected_norm_key == prior_rule.get("_norm_key"):
+        return 2, "Norm / benchmark"
+    return None
+
+
+def prior_norm_rules_for_audit_row(
+    question: str,
+    question_label: str,
+    selected_norm: str,
+    prior_rules: list[dict],
+) -> list[dict]:
+    matches = []
+    for position, prior_rule in enumerate(prior_rules):
+        match = prior_norm_rule_match_priority(
+            prior_rule,
+            question,
+            question_label,
+            selected_norm,
+        )
+        if match is None:
+            continue
+
+        priority, reason = match
+        matches.append(
+            {
+                **prior_rule,
+                "_match_priority": priority,
+                "_match_reason": reason,
+                "_history_position": position,
+            }
+        )
+
+    return sorted(
+        matches,
+        key=lambda rule: (rule["_match_priority"], rule["_history_position"]),
+    )
+
+
+def preferred_prior_norm_rule(
+    question: str,
+    question_label: str,
+    selected_norm: str,
+    prior_rules: list[dict],
+) -> dict | None:
+    matches = prior_norm_rules_for_audit_row(
+        question,
+        question_label,
+        selected_norm,
+        prior_rules,
+    )
+    return matches[0] if matches else None
+
+
+def norm_audit_prior_rule_issues(
+    editor_df: pd.DataFrame,
+    prior_rules: list[dict],
+) -> list[dict]:
+    if editor_df.empty or not prior_rules:
+        return []
+
+    issues = []
+    for row in editor_df.to_dict(orient="records"):
+        question = normalize_answer(row.get("Variable Name"))
+        question_label = normalize_answer(row.get("Question Text")) or question
+        selected_norm = normalize_answer(row.get("Norm / benchmark"))
+        is_na = (
+            bool(row.get("NA"))
+            or selected_norm == NA_NORM_OPTION
+            or normalize_question_type(row.get("Question Type")) == "Ignore"
+        )
+        if not question or not selected_norm or is_na:
+            continue
+
+        current_box_scores = [
+            score
+            for score in BOX_SCORE_OPTIONS
+            if bool(row.get(score))
+        ]
+        current_signature = tuple(current_box_scores)
+        matches = prior_norm_rules_for_audit_row(
+            question,
+            question_label or question,
+            selected_norm,
+            prior_rules,
+        )
+        if not matches:
+            continue
+
+        differing_matches = []
+        seen_signatures: set[tuple[str, ...]] = set()
+        for match in matches:
+            prior_signature = tuple(match.get("Box scores", []))
+            if prior_signature == current_signature or prior_signature in seen_signatures:
+                continue
+            differing_matches.append(match)
+            seen_signatures.add(prior_signature)
+
+        if not differing_matches:
+            continue
+
+        previous_box_scores = [
+            box_score_display(match.get("Box scores", []))
+            for match in differing_matches[:4]
+        ]
+        dataset_labels = [
+            f"{match.get('Uploaded file', NOT_AVAILABLE)} ({match.get('Saved at', NOT_AVAILABLE)})"
+            for match in differing_matches[:4]
+        ]
+        issues.append(
+            {
+                "Variable Name": question,
+                "Norm / benchmark": selected_norm,
+                "Current box score": box_score_display(current_box_scores),
+                "Previous saved box score": "; ".join(previous_box_scores),
+                "Matched by": ", ".join(
+                    dict.fromkeys(match.get("_match_reason", "") for match in differing_matches)
+                ),
+                "Saved dataset": "; ".join(dataset_labels),
+            }
+        )
+
+    return issues
+
+
+def build_norm_catalog(
+    candidate_questions: list[str],
+    saved_mappings: dict[str, str],
+    prior_rules: list[dict] | None = None,
+) -> list[str]:
+    catalog: list[str] = []
+
+    for target in saved_mappings.values():
+        normalized_target = normalize_answer(target)
+        if (
+            normalized_target
+            and normalized_target.upper() != NA_NORM_OPTION
+            and normalized_target not in catalog
+        ):
+            catalog.append(normalized_target)
+
+    for prior_rule in prior_rules or []:
+        normalized_target = normalize_answer(prior_rule.get("Norm / benchmark"))
+        if (
+            normalized_target
+            and normalized_target.upper() != NA_NORM_OPTION
+            and normalized_target not in catalog
+        ):
+            catalog.append(normalized_target)
+
+    for question in candidate_questions:
+        if is_default_na_metadata_variable(question) or is_project_metadata_variable(question):
+            continue
+        if question not in catalog:
+            catalog.append(question)
+
+    return catalog
+
+
+def closest_norm_benchmark(
+    variable: str,
+    question_label: str,
+    norm_catalog: list[str],
+    question_labels: dict[str, str],
+) -> str:
+    if variable in norm_catalog:
+        return variable
+
+    source_candidates = [variable, question_label]
+    best_norm = variable
+    best_score = 0.0
+
+    for norm in norm_catalog:
+        target_candidates = [norm, question_labels.get(norm, norm)]
+        for source_value in source_candidates:
+            source_key = normalize_column_name(source_value)
+            if not source_key:
+                continue
+            for target_value in target_candidates:
+                target_key = normalize_column_name(target_value)
+                if not target_key:
+                    continue
+                score = SequenceMatcher(None, source_key, target_key).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_norm = norm
+
+    return best_norm if best_score >= 0.55 else variable
+
+
+def resolve_saved_norm_for_question(
+    question: str,
+    question_label: str,
+    saved_mappings: dict[str, str],
+    saved_na_aliases: set[str],
+) -> str | None:
+    exact_saved_norm = saved_mappings.get(question)
+    if exact_saved_norm is not None:
+        return exact_saved_norm
+
+    candidate_aliases = {
+        alias
+        for alias in [
+            normalize_alias_key(question),
+            normalize_alias_key(question_label),
+        ]
+        if alias
+    }
+    if candidate_aliases & saved_na_aliases:
+        return NA_NORM_OPTION
+
+    for saved_question, saved_norm in saved_mappings.items():
+        normalized_saved_norm = normalize_answer(saved_norm)
+        if normalized_saved_norm != NA_NORM_OPTION:
+            continue
+        if normalize_alias_key(saved_question) in candidate_aliases:
+            return NA_NORM_OPTION
+
+    return None
+
+
+def summarize_response_options(
+    df: pd.DataFrame,
+    question: str,
+    response_labels: dict[str, dict[str, str]],
+    split_multi_select: bool,
+    delimiter: str,
+    question_labels: dict[str, str] | None = None,
+    question_type: str | None = None,
+    max_options: int = 8,
+) -> str:
+    options = response_options_for_question(
+        df,
+        question,
+        response_labels,
+        split_multi_select,
+        delimiter,
+        question_labels,
+        question_type,
+    )
+    labels = [display_response_label(question, option, response_labels) for option in options]
+    if len(labels) > max_options:
+        return " | ".join(labels[:max_options]) + f" | +{len(labels) - max_options} more"
+    return " | ".join(labels)
+
+
+def build_norm_audit_frame(
+    df: pd.DataFrame,
+    candidate_questions: list[str],
+    question_labels: dict[str, str],
+    response_labels: dict[str, dict[str, str]],
+    saved_mappings: dict[str, str],
+    saved_box_scores: dict[str, list[str]],
+    saved_question_types: dict[str, str],
+    saved_na_aliases: set[str],
+    split_multi_select: bool,
+    delimiter: str,
+    prior_rules: list[dict] | None = None,
+) -> pd.DataFrame:
+    prior_rules = prior_rules or []
+    norm_catalog = build_norm_catalog(candidate_questions, saved_mappings, prior_rules)
+    rows = []
+
+    for question in candidate_questions:
+        question_label = display_question_label(question, question_labels)
+        is_metadata_variable = is_default_na_metadata_variable(question)
+        suggested_norm = (
+            NA_NORM_OPTION
+            if is_metadata_variable
+            else closest_norm_benchmark(
+                question,
+                question_label,
+                norm_catalog,
+                question_labels,
+            )
+        )
+        saved_norm = resolve_saved_norm_for_question(
+            question,
+            question_label,
+            saved_mappings,
+            saved_na_aliases,
+        )
+        selected_norm = saved_norm if saved_norm is not None else suggested_norm
+        is_na = selected_norm == NA_NORM_OPTION
+        prior_rule = preferred_prior_norm_rule(
+            question,
+            question_label,
+            selected_norm,
+            prior_rules,
+        )
+        detected_question_type = guess_question_type(
+            df,
+            question,
+            question_labels,
+            response_labels,
+            split_multi_select,
+            delimiter,
+        )
+        question_type = saved_question_types.get(
+            question,
+            (prior_rule or {}).get("Question Type", detected_question_type),
+        )
+        if is_metadata_variable:
+            selected_box_scores = []
+        elif question in saved_box_scores:
+            selected_box_scores = saved_box_scores.get(question, [])
+        elif prior_rule is not None:
+            selected_box_scores = prior_rule.get("Box scores", [])
+        else:
+            selected_box_scores = box_scores_from_text(
+                selected_norm,
+                suggested_norm,
+                question,
+                question_label,
+            )
+
+        rows.append(
+            {
+                "NA": is_na,
+                "Variable Name": question,
+                "Question Text": question_label,
+                "Question Type": question_type,
+                "Suggested norm/benchmark": suggested_norm,
+                "Norm / benchmark": selected_norm,
+                "T2B": "T2B" in selected_box_scores,
+                "T3B": "T3B" in selected_box_scores,
+                "B2B": "B2B" in selected_box_scores,
+                "B3B": "B3B" in selected_box_scores,
+                "Answer Choices Count": len(
+                    response_options_for_question(
+                        df,
+                        question,
+                        response_labels,
+                        split_multi_select,
+                        delimiter,
+                        question_labels,
+                        question_type,
+                    )
+                ),
+                "Answer Choices": summarize_response_options(
+                    df,
+                    question,
+                    response_labels,
+                    split_multi_select,
+                    delimiter,
+                    question_labels,
+                    question_type,
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def normalize_box_score_audit_editor(editor_df: pd.DataFrame) -> dict[str, list[str]]:
+    settings: dict[str, list[str]] = {}
+    if editor_df.empty:
+        return settings
+
+    for row in editor_df.to_dict(orient="records"):
+        variable = normalize_answer(row.get("Variable Name"))
+        if not variable:
+            continue
+
+        if normalize_question_type(row.get("Question Type")) == "Ignore":
+            settings[variable] = []
+            continue
+
+        selected_scores = [
+            score
+            for score in BOX_SCORE_OPTIONS
+            if bool(row.get(score))
+        ]
+        settings[variable] = selected_scores
+
+    return settings
+
+
+def normalize_question_type_audit_editor(editor_df: pd.DataFrame) -> dict[str, str]:
+    settings: dict[str, str] = {}
+    if editor_df.empty:
+        return settings
+
+    for row in editor_df.to_dict(orient="records"):
+        variable = normalize_answer(row.get("Variable Name"))
+        if not variable:
+            continue
+        settings[variable] = normalize_question_type(row.get("Question Type"))
+
+    return settings
+
+
+def normalize_na_aliases_from_audit_editor(editor_df: pd.DataFrame) -> set[str]:
+    aliases: set[str] = set()
+    if editor_df.empty:
+        return aliases
+
+    for row in editor_df.to_dict(orient="records"):
+        selected_norm = normalize_answer(row.get("Norm / benchmark"))
+        is_na = (
+            bool(row.get("NA"))
+            or selected_norm == NA_NORM_OPTION
+            or normalize_question_type(row.get("Question Type")) == "Ignore"
+        )
+        if not is_na:
+            continue
+
+        for value in [row.get("Variable Name"), row.get("Question Text")]:
+            alias = normalize_alias_key(value)
+            if alias:
+                aliases.add(alias)
+
+    return aliases
+
+
+def build_saved_norm_review_frame(
+    saved_mappings: dict[str, str],
+    saved_box_scores: dict[str, list[str]],
+    saved_question_types: dict[str, str],
+    denominator_settings: dict[str, str],
+) -> pd.DataFrame:
+    variables = sorted(
+        set(saved_mappings)
+        | set(saved_box_scores)
+        | set(saved_question_types)
+        | set(denominator_settings)
+    )
+    rows = []
+
+    for variable in variables:
+        mapped_norm = saved_mappings.get(variable, "")
+        is_na = mapped_norm == NA_NORM_OPTION
+        box_scores = [
+            score
+            for score in saved_box_scores.get(variable, [])
+            if score in BOX_SCORE_OPTIONS
+        ]
+        rows.append(
+            {
+                "Variable Name": variable,
+                "Norm / benchmark": mapped_norm or NOT_AVAILABLE,
+                "NA": is_na,
+                "Question Type": saved_question_types.get(variable, NOT_AVAILABLE),
+                "Box scores": ", ".join(box_scores) if box_scores else "None",
+                "Denominator": denominator_settings.get(variable, DEFAULT_DENOMINATOR),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def normalize_norm_audit_editor(editor_df: pd.DataFrame) -> dict[str, str]:
+    mappings: dict[str, str] = {}
+    if editor_df.empty:
+        return mappings
+
+    for row in editor_df.to_dict(orient="records"):
+        variable = normalize_answer(row.get("Variable Name"))
+        selected_norm = normalize_answer(row.get("Norm / benchmark"))
+        is_na = (
+            bool(row.get("NA"))
+            or selected_norm == NA_NORM_OPTION
+            or normalize_question_type(row.get("Question Type")) == "Ignore"
+        )
+
+        if not variable:
+            continue
+
+        mappings[variable] = NA_NORM_OPTION if is_na else (selected_norm or variable)
+
+    return mappings
+
+
+def included_norm_mappings(audit_mappings: dict[str, str]) -> dict[str, str]:
+    return {
+        variable: norm
+        for variable, norm in audit_mappings.items()
+        if norm and norm != NA_NORM_OPTION
+    }
+
+
+def normalize_column_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value).lower()).strip("_")
+
+
+def normalize_alias_key(value) -> str:
+    normalized = normalize_answer(value)
+    if not normalized:
+        return ""
+    return normalize_column_name(normalized)
+
+
+def make_unique_column_names(raw_values: list[object]) -> list[str]:
+    names: list[str] = []
+    used_counts: dict[str, int] = {}
+
+    for index, value in enumerate(raw_values, start=1):
+        base_name = normalize_answer(value) or f"column_{index}"
+        count = used_counts.get(base_name, 0)
+        column_name = base_name if count == 0 else f"{base_name}_{count + 1}"
+        used_counts[base_name] = count + 1
+        names.append(column_name)
+
+    return names
+
+
+def is_default_na_metadata_variable(column) -> bool:
+    blacklist = {value.lower() for value in DEFAULT_VARIABLE_BLACKLIST}
+    blacklist_prefixes = [value.lower() for value in DEFAULT_BLACKLIST_PREFIXES]
+    normalized = normalize_answer(column) or ""
+    normalized_lower = normalized.lower()
+
+    return normalized_lower in blacklist or any(
+        normalized_lower.startswith(prefix) for prefix in blacklist_prefixes
+    )
+
+
+def is_project_metadata_variable(column) -> bool:
+    return normalize_alias_key(column) in {
+        normalize_alias_key(variable)
+        for variable in PROJECT_METADATA_VARIABLES
+    }
+
+
+def identify_metadata_columns(columns) -> list[str]:
+    return [column for column in columns if is_default_na_metadata_variable(column)]
+
+
+def default_group_column_index(columns: list[str]) -> int:
+    normalized_columns = {
+        normalize_column_name(str(column)): index
+        for index, column in enumerate(columns)
+    }
+
+    for candidate in GROUP_COLUMN_CANDIDATES:
+        index = normalized_columns.get(normalize_column_name(candidate))
+        if index is not None:
+            return index
+
+    for index, column in enumerate(columns):
+        if not is_default_na_metadata_variable(column) and not is_project_metadata_variable(column):
+            return index
+
+    return 0
+
+
+def infer_column(columns: list[str], candidates: list[str]) -> str | None:
+    normalized_columns = {normalize_column_name(column): column for column in columns}
+    for candidate in candidates:
+        match = normalized_columns.get(normalize_column_name(candidate))
+        if match:
+            return match
+    return None
+
+
+def build_response_label_maps(
+    label_df: pd.DataFrame | None,
+    question_column: str | None,
+    value_column: str | None,
+    label_column: str | None,
+    question_label_column: str | None,
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    response_labels: dict[str, dict[str, str]] = {}
+    question_labels: dict[str, str] = {}
+
+    if (
+        label_df is None
+        or label_df.empty
+        or not question_column
+        or not value_column
+        or not label_column
+    ):
+        return response_labels, question_labels
+
+    for _, row in label_df.iterrows():
+        question = normalize_answer(row.get(question_column))
+        value = normalize_answer(row.get(value_column))
+        label = normalize_answer(row.get(label_column))
+
+        if question_label_column:
+            question_label = normalize_answer(row.get(question_label_column))
+            if question and question_label:
+                question_labels[question] = question_label
+
+        if question and value and label:
+            response_labels.setdefault(question, {})[value] = label
+
+    return response_labels, question_labels
+
+
+def display_response_label(
+    question: str,
+    value: str,
+    response_labels: dict[str, dict[str, str]],
+) -> str:
+    return response_labels.get(question, {}).get(value, value)
+
+
+def display_question_label(question: str, question_labels: dict[str, str]) -> str:
+    return question_labels.get(question, question)
+
+
+def display_norm_mapping_label(
+    source_question: str,
+    mapped_norm: str,
+    question_labels: dict[str, str],
+) -> str:
+    source_label = display_question_label(source_question, question_labels)
+    mapped_label = display_question_label(mapped_norm, question_labels)
+    if source_question == mapped_norm:
+        return source_label
+    return f"{source_label} -> {mapped_label}"
+
+
+def display_norm_variable_mapping_label(source_question: str, mapped_norm: str) -> str:
+    if source_question == mapped_norm:
+        return source_question
+    return f"{source_question} -> {mapped_norm}"
+
+
+def looks_like_metadata_row(row: pd.Series, header_values: list[str], row_index: int) -> bool:
+    values = [normalize_answer(value) or "" for value in row.tolist()]
+    non_empty_values = [value for value in values if value]
+    if not non_empty_values:
+        return True
+
+    import_id_hits = sum("importid" in value.lower() for value in non_empty_values)
+    header_overlap = sum(value in header_values for value in non_empty_values)
+    metadata_hits = sum(
+        any(token in value.lower() for token in ["qualtrics", "metadata", "question text", "survey"])
+        for value in non_empty_values
+    )
+
+    if row_index == 2 and import_id_hits >= max(1, len(non_empty_values) // 3):
+        return True
+    if header_overlap >= max(2, len(non_empty_values) // 2):
+        return True
+    if metadata_hits >= max(2, len(non_empty_values) // 2):
+        return True
+    return False
+
+
+def prepare_smart_tables_layout(raw_df: pd.DataFrame) -> RespondentSheet:
+    if raw_df.shape[0] < 2:
+        raise ValueError("The selected sheet needs at least a variable row and a question-label row.")
+
+    header_values = [normalize_answer(value) or "" for value in raw_df.iloc[0].tolist()]
+    if not any(header_values):
+        raise ValueError("The first row does not contain usable variable names.")
+
+    column_names = make_unique_column_names(raw_df.iloc[0].tolist())
+    question_label_row = raw_df.iloc[1].tolist()
+    question_labels = {
+        column: normalize_answer(label) or column
+        for column, label in zip(column_names, question_label_row)
+    }
+
+    df = raw_df.copy()
+    df.columns = column_names
+
+    rows_to_drop = [0, 1]
+    metadata_rows_removed = 0
+    for row_index in range(2, len(df)):
+        if looks_like_metadata_row(df.iloc[row_index], header_values, row_index):
+            rows_to_drop.append(row_index)
+            metadata_rows_removed += 1
+        else:
+            break
+
+    cleaned_df = df.drop(index=rows_to_drop).reset_index(drop=True)
+    metadata_columns = identify_metadata_columns(cleaned_df.columns)
+    return RespondentSheet(
+        dataframe=cleaned_df,
+        question_labels=question_labels,
+        metadata_rows_removed=metadata_rows_removed,
+        metadata_columns_default_na=len(metadata_columns),
+        metadata_columns=metadata_columns,
+    )
+
+
+def safe_rate(count: int, denominator: int | None) -> float | None:
+    if denominator is None or denominator <= 0:
+        return None
+    return count / denominator
+
+
+def two_proportion_z_test(
+    control_count: int,
+    control_n: int | None,
+    test_count: int,
+    test_n: int | None,
+) -> str:
+    if control_n is None or test_n is None or control_n <= 0 or test_n <= 0:
+        return NOT_TESTED
+
+    if control_count > control_n or test_count > test_n:
+        return NOT_TESTED
+
+    pooled_n = control_n + test_n
+    pooled_rate = (control_count + test_count) / pooled_n
+    standard_error = math.sqrt(
+        pooled_rate * (1 - pooled_rate) * ((1 / control_n) + (1 / test_n))
+    )
+
+    if standard_error == 0:
+        return "Not significant"
+
+    control_rate = control_count / control_n
+    test_rate = test_count / test_n
+    z_score = (test_rate - control_rate) / standard_error
+    p_value = math.erfc(abs(z_score) / math.sqrt(2))
+
+    return "Significant" if p_value < SIGNIFICANCE_ALPHA else "Not significant"
+
+
+def format_percent(value: float | None) -> str:
+    if value is None:
+        return NOT_AVAILABLE
+    return format_percent_points(value * 100)
+
+
+def round_percentage_points(value: float) -> int:
+    if value >= 0:
+        return int(math.floor(value + 0.5))
+    return int(math.ceil(value - 0.5))
+
+
+def format_lift_points(points: float | None) -> str:
+    if points is None:
+        return NOT_AVAILABLE
+    return f"{round_percentage_points(points):+d}pts"
+
+
+def format_percent_points(points: float | None) -> str:
+    if points is None:
+        return NOT_AVAILABLE
+    return f"{round_percentage_points(points):d}%"
+
+
+def format_lift(control_rate: float | None, test_rate: float | None) -> str:
+    if control_rate is None or test_rate is None:
+        return NOT_AVAILABLE
+    return format_lift_points((test_rate - control_rate) * 100)
+
+
+def normalize_percent_cell(value: object) -> object:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return value
+
+    text = str(value).strip()
+    if not text or text in {NOT_AVAILABLE, NOT_TESTED}:
+        return value
+
+    match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)\s*%", text)
+    if not match:
+        return value
+
+    return format_percent_points(float(match.group(1)))
+
+
+def normalize_lift_cell(value: object) -> object:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return value
+
+    if isinstance(value, (int, float)):
+        return format_lift_points(float(value))
+
+    text = str(value).strip()
+    if not text or text in {NOT_AVAILABLE, NOT_TESTED}:
+        return value
+
+    match = re.fullmatch(
+        r"([+-]?\d+(?:\.\d+)?)\s*(?:pts?|pp|percentage points)?",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return value
+
+    return format_lift_points(float(match.group(1)))
+
+
+def normalize_lift_output_table(table: pd.DataFrame) -> pd.DataFrame:
+    output_table = table.copy()
+    for column in ["Control", "Test"]:
+        if column in output_table.columns:
+            output_table[column] = output_table[column].map(normalize_percent_cell)
+    if "Lift" in output_table.columns:
+        output_table["Lift"] = output_table["Lift"].map(normalize_lift_cell)
+    return output_table
+
+
+
+def calculate_norm_table(
+    df: pd.DataFrame,
+    question: str,
+    group_column: str,
+    control_label: str | None,
+    test_label: str | None,
+    denominator_setting: str,
+    split_multi_select: bool,
+    delimiter: str,
+    response_labels: dict[str, dict[str, str]] | None = None,
+    question_labels: dict[str, str] | None = None,
+    box_scores: list[str] | None = None,
+    question_type: str | None = None,
+) -> pd.DataFrame:
+    response_labels = response_labels or {}
+    question_labels = question_labels or {}
+    question_type = normalize_question_type(question_type)
+    box_scores = [
+        score
+        for score in (box_scores or [])
+        if score in BOX_SCORE_OPTIONS
+    ]
+    required_labels_missing = not group_column or not control_label or not test_label
+
+    group_values = df[group_column].map(normalize_answer) if group_column in df.columns else pd.Series([])
+    control_df = df[group_values == control_label] if not required_labels_missing else pd.DataFrame()
+    test_df = df[group_values == test_label] if not required_labels_missing else pd.DataFrame()
+
+    control_n = denominator_for(control_df, question, denominator_setting)
+    test_n = denominator_for(test_df, question, denominator_setting)
+    options = response_options_for_question(
+        df,
+        question,
+        response_labels,
+        split_multi_select,
+        delimiter,
+        question_labels,
+        question_type,
+    )
+    control_counts = response_counts(
+        control_df,
+        question,
+        split_multi_select,
+        delimiter,
+        options,
+    )
+    test_counts = response_counts(
+        test_df,
+        question,
+        split_multi_select,
+        delimiter,
+        options,
+    )
+    if not options:
+        options = option_order(control_counts, test_counts)
+
+    rows = [
+        {
+            "Response option": f"Base size ({denominator_setting})",
+            "Control": control_n if control_n is not None else NOT_AVAILABLE,
+            "Test": test_n if test_n is not None else NOT_AVAILABLE,
+            "Lift": NOT_AVAILABLE,
+            "Significance result": NOT_TESTED,
+        }
+    ]
+
+    if not options:
+        return pd.DataFrame(rows)
+
+    base_box_options = box_score_base_options(question, options, response_labels)
+    if not box_scores:
+        for option in options:
+            response_option = display_response_label(question, option, response_labels)
+            control_count = control_counts.get(option, 0)
+            test_count = test_counts.get(option, 0)
+            control_rate = safe_rate(control_count, control_n)
+            test_rate = safe_rate(test_count, test_n)
+            significance = (
+                NOT_TESTED
+                if required_labels_missing
+                else two_proportion_z_test(control_count, control_n, test_count, test_n)
+            )
+
+            rows.append(
+                {
+                    "Response option": response_option,
+                    "Control": format_percent(control_rate),
+                    "Test": format_percent(test_rate),
+                    "Lift": format_lift(control_rate, test_rate),
+                    "Significance result": significance,
+                }
+            )
+
+    for box_score in box_scores:
+        selected_options = selected_box_score_options(box_score, base_box_options)
+        response_option = box_score_response_label(
+            question,
+            box_score,
+            selected_options,
+            response_labels,
+        )
+
+        if selected_options:
+            control_count = box_score_count(control_df, question, selected_options, delimiter)
+            test_count = box_score_count(test_df, question, selected_options, delimiter)
+            control_rate = safe_rate(control_count, control_n)
+            test_rate = safe_rate(test_count, test_n)
+            significance = (
+                NOT_TESTED
+                if required_labels_missing
+                else two_proportion_z_test(control_count, control_n, test_count, test_n)
+            )
+        else:
+            control_rate = None
+            test_rate = None
+            significance = NOT_TESTED
+
+        rows.append(
+            {
+                "Response option": response_option,
+                "Control": format_percent(control_rate),
+                "Test": format_percent(test_rate),
+                "Lift": format_lift(control_rate, test_rate),
+                "Significance result": significance,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def build_norm_tables(
+    df: pd.DataFrame,
+    norm_questions: list[str],
+    included_mappings: dict[str, str],
+    group_column: str,
+    control_label: str | None,
+    test_label: str | None,
+    denominator_settings: dict[str, str],
+    split_multi_select: bool,
+    delimiter: str,
+    response_labels: dict[str, dict[str, str]],
+    question_labels: dict[str, str],
+    box_score_settings: dict[str, list[str]],
+    saved_box_score_settings: dict[str, list[str]],
+    question_type_settings: dict[str, str],
+    saved_question_type_settings: dict[str, str],
+) -> dict[str, pd.DataFrame]:
+    tables: dict[str, pd.DataFrame] = {}
+
+    for question in norm_questions:
+        mapped_norm = included_mappings.get(question, question)
+        denominator_setting = denominator_settings.get(question, DEFAULT_DENOMINATOR)
+        tables[f"{mapped_norm}__{question}"] = calculate_norm_table(
+            df,
+            question,
+            group_column,
+            control_label,
+            test_label,
+            denominator_setting,
+            split_multi_select,
+            delimiter,
+            response_labels,
+            question_labels,
+            box_score_settings.get(
+                question,
+                saved_box_score_settings.get(question, []),
+            ),
+            question_type_settings.get(
+                question,
+                saved_question_type_settings.get(question),
+            ),
+        )
+
+    return tables
+
+
+def markdown_escape(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def append_changelog_entries(changes: list[tuple[str, str | None, str]]) -> None:
+    if not changes:
+        return
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    entries = [
+        f"- {timestamp}: Denominator setting for `{question}` changed from "
+        f"`{old or 'Default: Total answering'}` to `{new}`."
+        for question, old, new in changes
+    ]
+
+    if CHANGELOG_PATH.exists():
+        content = CHANGELOG_PATH.read_text()
+    else:
+        content = "# Changelog\n\n## Unreleased\n"
+
+    marker = "## Unreleased"
+    if marker in content:
+        content = content.replace(marker, marker + "\n" + "\n".join(entries), 1)
+    else:
+        content = content.rstrip() + "\n\n## Unreleased\n" + "\n".join(entries) + "\n"
+
+    CHANGELOG_PATH.write_text(content if content.endswith("\n") else content + "\n")
+
+
+def update_status_denominator_snapshot(settings: dict[str, str]) -> None:
+    start_marker = "<!-- denominator-settings:start -->"
+    end_marker = "<!-- denominator-settings:end -->"
+
+    rows = ["| Norm question | Denominator |", "| --- | --- |"]
+    if settings:
+        rows.extend(
+            f"| {markdown_escape(question)} | {markdown_escape(setting)} |"
+            for question, setting in sorted(settings.items())
+        )
+    else:
+        rows.append("| No saved overrides yet | Total answering default |")
+
+    snapshot = f"{start_marker}\n" + "\n".join(rows) + f"\n{end_marker}"
+
+    if STATUS_PATH.exists():
+        content = STATUS_PATH.read_text()
+    else:
+        content = "# Status\n\n## Denominator Settings\n\n"
+
+    if start_marker in content and end_marker in content:
+        before = content.split(start_marker, 1)[0]
+        after = content.split(end_marker, 1)[1]
+        content = before + snapshot + after
+    else:
+        content = content.rstrip() + "\n\n## Denominator Settings\n\n" + snapshot + "\n"
+
+    STATUS_PATH.write_text(content if content.endswith("\n") else content + "\n")
+
+
+def persist_denominator_changes(
+    previous_settings: dict[str, str],
+    selected_settings: dict[str, str],
+) -> None:
+    merged_settings = {**previous_settings, **selected_settings}
+    changes = [
+        (question, previous_settings.get(question), setting)
+        for question, setting in selected_settings.items()
+        if previous_settings.get(question, DEFAULT_DENOMINATOR) != setting
+    ]
+
+    save_denominator_settings(merged_settings)
+    append_changelog_entries(changes)
+    update_status_denominator_snapshot(merged_settings)
+
+
+def read_excel_workbook(uploaded_file) -> tuple[bytes, pd.ExcelFile] | tuple[None, None]:
+    workbook_bytes = uploaded_file.getvalue()
+    try:
+        return workbook_bytes, pd.ExcelFile(BytesIO(workbook_bytes))
+    except Exception as exc:
+        st.error(f"Could not read Excel workbook: {exc}")
+        return None, None
+
+
+def read_excel_sheet(workbook_bytes: bytes, sheet_name: str) -> pd.DataFrame | None:
+    try:
+        return pd.read_excel(BytesIO(workbook_bytes), sheet_name=sheet_name, dtype=object)
+    except Exception as exc:
+        st.error(f"Could not read Excel sheet `{sheet_name}`: {exc}")
+        return None
+
+
+def auto_detect_response_labels(
+    workbook_bytes: bytes,
+    excel_file: pd.ExcelFile,
+    data_sheet: str,
+) -> tuple[str, dict[str, dict[str, str]], dict[str, str]]:
+    for sheet_name in excel_file.sheet_names:
+        if sheet_name == data_sheet:
+            continue
+
+        try:
+            label_data = pd.read_excel(
+                BytesIO(workbook_bytes),
+                sheet_name=sheet_name,
+                dtype=object,
+            )
+        except Exception:
+            continue
+
+        if label_data.empty:
+            continue
+
+        label_columns = list(label_data.columns)
+        question_column = infer_column(label_columns, QUESTION_COLUMN_CANDIDATES)
+        value_column = infer_column(label_columns, VALUE_COLUMN_CANDIDATES)
+        label_column = infer_column(label_columns, LABEL_COLUMN_CANDIDATES)
+        question_label_column = infer_column(label_columns, QUESTION_LABEL_COLUMN_CANDIDATES)
+
+        if not question_column or not value_column or not label_column:
+            continue
+
+        label_response_labels, label_question_labels = build_response_label_maps(
+            label_data,
+            question_column,
+            value_column,
+            label_column,
+            question_label_column,
+        )
+        if label_response_labels or label_question_labels:
+            return sheet_name, label_response_labels, label_question_labels
+
+    return NO_LABEL_SHEET, {}, {}
+
+
+def project_metadata_column_lookup(columns) -> dict[str, str]:
+    normalized_columns = {
+        normalize_alias_key(column): column
+        for column in columns
+        if normalize_alias_key(column)
+    }
+    return {
+        variable: normalized_columns[normalize_alias_key(variable)]
+        for variable in PROJECT_METADATA_VARIABLES
+        if normalize_alias_key(variable) in normalized_columns
+    }
+
+
+def summarize_metadata_value(series: pd.Series) -> str:
+    values = [
+        value
+        for value in series.map(normalize_answer).dropna().drop_duplicates().tolist()
+        if value
+    ]
+    if not values:
+        return NOT_AVAILABLE
+    if len(values) <= 3:
+        return " | ".join(values)
+    return " | ".join(values[:3]) + f" | +{len(values) - 3} more"
+
+
+def project_metadata_values(df: pd.DataFrame | None) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if df is None:
+        return {
+            variable: NOT_AVAILABLE
+            for variable in PROJECT_METADATA_VARIABLES
+        }
+
+    lookup = project_metadata_column_lookup(df.columns)
+    for variable in PROJECT_METADATA_VARIABLES:
+        source_column = lookup.get(variable)
+        values[variable] = (
+            summarize_metadata_value(df[source_column])
+            if source_column in df.columns
+            else NOT_AVAILABLE
+        )
+    return values
+
+
+def norm_filter_key(label: str) -> str:
+    return f"{NORM_FILTER_SESSION_PREFIX}{normalize_alias_key(label)}"
+
+
+def reset_norm_filters() -> None:
+    for label, _aliases in NORM_FILTER_FIELDS:
+        st.session_state[norm_filter_key(label)] = []
+
+
+def filter_key_matches_alias(normalized_key: str, aliases: list[str]) -> bool:
+    if not normalized_key:
+        return False
+
+    key_parts = set(normalized_key.split("_"))
+    for alias in aliases:
+        target = normalize_alias_key(alias)
+        if normalized_key == target or target in key_parts:
+            return True
+    return False
+
+
+def filter_column_for_field(
+    df: pd.DataFrame,
+    question_labels: dict[str, str],
+    aliases: list[str],
+    exact_match: bool = False,
+) -> str | None:
+    alias_keys = {normalize_alias_key(alias) for alias in aliases if normalize_alias_key(alias)}
+
+    for column in df.columns:
+        if normalize_alias_key(column) in alias_keys:
+            return column
+
+    for column in df.columns:
+        label = question_labels.get(column)
+        if label and normalize_alias_key(label) in alias_keys:
+            return column
+
+    if exact_match:
+        return None
+
+    for column in df.columns:
+        if filter_key_matches_alias(normalize_alias_key(column), aliases):
+            return column
+
+    for column in df.columns:
+        label = question_labels.get(column)
+        if label and filter_key_matches_alias(normalize_alias_key(label), aliases):
+            return column
+
+    return None
+
+
+def filter_option_values(series: pd.Series) -> list[str]:
+    values = [
+        value
+        for value in series.map(normalize_answer).dropna().drop_duplicates().tolist()
+        if value
+    ]
+
+    def sort_key(value: str) -> tuple[int, int | str, str]:
+        if value.isdigit():
+            return (0, int(value), value)
+        return (1, value.lower(), value)
+
+    return sorted(values, key=sort_key)
+
+
+def apply_norm_filters(
+    df: pd.DataFrame,
+    selected_filters: dict[str, list[str]],
+) -> pd.DataFrame:
+    filtered_df = df
+    for column, selected_values in selected_filters.items():
+        if column not in filtered_df.columns or not selected_values:
+            continue
+
+        selected_value_set = {
+            normalize_answer(value)
+            for value in selected_values
+            if normalize_answer(value)
+        }
+        if not selected_value_set:
+            continue
+
+        filtered_df = filtered_df[
+            filtered_df[column].map(normalize_answer).isin(selected_value_set)
+        ]
+
+    return filtered_df
+
+
+def describe_norm_filter(
+    label: str,
+    column: str,
+    selected_values: list[str],
+    response_labels: dict[str, dict[str, str]],
+) -> str:
+    displayed_values = [
+        display_response_label(column, value, response_labels)
+        for value in selected_values
+    ]
+    if len(displayed_values) > 3:
+        displayed_values = displayed_values[:3] + [f"+{len(selected_values) - 3} more"]
+    return f"{label}: {', '.join(displayed_values)}"
+
+
+def render_norm_filter_controls(
+    df: pd.DataFrame,
+    group_column: str,
+    control_label: str,
+    test_label: str,
+    question_labels: dict[str, str],
+    response_labels: dict[str, dict[str, str]],
+) -> pd.DataFrame:
+    st.subheader("Filters")
+    st.caption(
+        "Filter the respondent rows before calculating the norm tables. "
+        "Reset returns to total control vs test."
+    )
+
+    reset_col, status_col = st.columns([1, 3])
+    if reset_col.button("Reset to total control vs test", use_container_width=True):
+        reset_norm_filters()
+
+    selected_filters: dict[str, list[str]] = {}
+    active_filter_descriptions: list[str] = []
+    unavailable_filters: list[str] = []
+    filter_columns = st.columns(3)
+
+    for index, (label, aliases) in enumerate(NORM_FILTER_FIELDS):
+        key = norm_filter_key(label)
+        column = filter_column_for_field(
+            df,
+            question_labels,
+            aliases,
+            exact_match=label in EXACT_NORM_FILTERS,
+        )
+        column_container = filter_columns[index % len(filter_columns)]
+
+        if column is None:
+            st.session_state[key] = []
+            unavailable_filters.append(label)
+            column_container.button(
+                f"{label}: Not available",
+                disabled=True,
+                use_container_width=True,
+            )
+            continue
+
+        options = filter_option_values(df[column])
+        st.session_state[key] = [
+            value
+            for value in st.session_state.get(key, [])
+            if value in options
+        ]
+
+        with column_container.popover(label, use_container_width=True):
+            selected_values = st.multiselect(
+                f"{label} values",
+                options,
+                key=key,
+                format_func=lambda value, source_column=column: display_response_label(
+                    source_column,
+                    value,
+                    response_labels,
+                ),
+                placeholder="All",
+            )
+            st.caption(f"Source variable: {column}")
+
+        selected_values = st.session_state.get(key, [])
+        if selected_values:
+            selected_filters[column] = selected_values
+            active_filter_descriptions.append(
+                describe_norm_filter(label, column, selected_values, response_labels)
+            )
+
+    filtered_df = apply_norm_filters(df, selected_filters)
+    group_values = (
+        filtered_df[group_column].map(normalize_answer)
+        if group_column in filtered_df.columns
+        else pd.Series([], dtype=object)
+    )
+    control_rows = int((group_values == control_label).sum())
+    test_rows = int((group_values == test_label).sum())
+
+    if active_filter_descriptions:
+        status_col.caption("Active filters: " + " | ".join(active_filter_descriptions))
+    else:
+        status_col.caption("No filters applied. Tables show total control vs test.")
+
+    metric_cols = st.columns(3)
+    metric_cols[0].metric("Filtered rows", f"{len(filtered_df):,}")
+    metric_cols[1].metric("Control rows", f"{control_rows:,}")
+    metric_cols[2].metric("Test rows", f"{test_rows:,}")
+
+    if unavailable_filters:
+        st.caption("Unavailable filters: " + ", ".join(unavailable_filters))
+    if filtered_df.empty:
+        st.warning("No respondent rows match the selected filters.")
+
+    return filtered_df
+
+
+def prompt_for_missing_project_metadata(
+    df: pd.DataFrame,
+    question_labels: dict[str, str],
+) -> tuple[pd.DataFrame, dict[str, str]]:
+    lookup = project_metadata_column_lookup(df.columns)
+    missing_variables = [
+        variable
+        for variable in PROJECT_METADATA_VARIABLES
+        if variable not in lookup
+    ]
+    if not missing_variables:
+        return df, question_labels
+
+    st.subheader("Project metadata")
+    st.caption(
+        "These metadata fields are used as norm table filters. Add a value for "
+        "any missing field and the app will create that column for this workbook."
+    )
+
+    updated_df = df.copy()
+    updated_labels = dict(question_labels)
+    input_columns = st.columns(3)
+    added_variables = []
+    for index, variable in enumerate(missing_variables):
+        value = input_columns[index % 3].text_input(
+            variable,
+            key=f"project_metadata_value_{variable}",
+            placeholder=f"Enter {variable}",
+        )
+        normalized_value = normalize_answer(value)
+        if normalized_value:
+            updated_df[variable] = normalized_value
+            updated_labels[variable] = variable
+            added_variables.append(variable)
+
+    if added_variables:
+        st.caption(
+            "Added metadata fields: "
+            + ", ".join(added_variables)
+            + "."
+        )
+    else:
+        st.info("Missing metadata fields left blank will not be available as filters.")
+
+    return updated_df, updated_labels
+
+
+def read_respondent_sheet(
+    workbook_bytes: bytes,
+    sheet_name: str,
+    data_layout: str,
+) -> RespondentSheet | None:
+    try:
+        if data_layout == SMART_TABLES_LAYOUT:
+            raw_df = pd.read_excel(
+                BytesIO(workbook_bytes),
+                sheet_name=sheet_name,
+                header=None,
+                dtype=object,
+            )
+            return prepare_smart_tables_layout(raw_df)
+
+        df = pd.read_excel(BytesIO(workbook_bytes), sheet_name=sheet_name, dtype=object)
+        question_labels = {column: str(column) for column in df.columns}
+        metadata_columns = identify_metadata_columns(df.columns)
+        return RespondentSheet(
+            dataframe=df,
+            question_labels=question_labels,
+            metadata_columns_default_na=len(metadata_columns),
+            metadata_columns=metadata_columns,
+        )
+    except Exception as exc:
+        st.error(f"Could not read respondent data from `{sheet_name}`: {exc}")
+        return None
+
+
+def excel_safe_sheet_name(name: str, used_names: set[str]) -> str:
+    safe_name = re.sub(r"[:\\/?*\[\]]", " ", name).strip() or "Norm Table"
+    safe_name = re.sub(r"\s+", " ", safe_name)[:31]
+    candidate = safe_name
+    counter = 2
+
+    while candidate in used_names:
+        suffix = f" {counter}"
+        candidate = f"{safe_name[:31 - len(suffix)]}{suffix}"
+        counter += 1
+
+    used_names.add(candidate)
+    return candidate
+
+
+def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
+    output = BytesIO()
+    used_names = {"All Norms"}
+    output_tables = {
+        question: normalize_lift_output_table(table)
+        for question, table in tables.items()
+    }
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        combined_table = pd.concat(output_tables.values(), ignore_index=True)
+        combined_table.to_excel(writer, sheet_name="All Norms", index=False)
+
+        for question, table in output_tables.items():
+            sheet_name = excel_safe_sheet_name(question, used_names)
+            table.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    return output.getvalue()
+
+
+def ensure_norm_database_dirs() -> None:
+    NORM_DATABASE_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_norm_database_manifest() -> list[dict]:
+    if not NORM_DATABASE_MANIFEST_PATH.exists():
+        return []
+
+    try:
+        data = json.loads(NORM_DATABASE_MANIFEST_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    return data if isinstance(data, list) else []
+
+
+def save_norm_database_manifest(records: list[dict]) -> None:
+    ensure_norm_database_dirs()
+    NORM_DATABASE_MANIFEST_PATH.write_text(
+        json.dumps(records, indent=2, sort_keys=True) + "\n"
+    )
+
+
+def norm_upload_fingerprint(workbook_bytes: bytes, data_sheet: str | None) -> str:
+    digest = hashlib.sha256()
+    digest.update(workbook_bytes)
+    digest.update(b"\0")
+    digest.update((data_sheet or "").encode("utf-8"))
+    return digest.hexdigest()
+
+
+def normalized_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def respondent_id_column_for_data(
+    df: pd.DataFrame,
+    question_labels: dict[str, str] | None = None,
+) -> str | None:
+    question_labels = question_labels or {}
+    candidate_keys = {
+        normalize_alias_key(candidate)
+        for candidate in RESPONDENT_ID_CANDIDATES
+        if normalize_alias_key(candidate)
+    }
+
+    for column in df.columns:
+        if normalize_alias_key(column) in candidate_keys:
+            return column
+
+    for column in df.columns:
+        label = question_labels.get(column)
+        if label and normalize_alias_key(label) in candidate_keys:
+            return column
+
+    return None
+
+
+def respondent_id_hashes_for_data(
+    df: pd.DataFrame,
+    question_labels: dict[str, str] | None = None,
+) -> tuple[str | None, list[str]]:
+    column = respondent_id_column_for_data(df, question_labels)
+    if column is None or column not in df.columns:
+        return None, []
+
+    normalized_values = [
+        normalize_answer(value)
+        for value in df[column].tolist()
+    ]
+    unique_values = sorted({value for value in normalized_values if value})
+    return column, [normalized_hash(value) for value in unique_values]
+
+
+def dataframe_content_fingerprint(
+    df: pd.DataFrame,
+    ignore_project_metadata: bool = True,
+) -> str:
+    columns = [
+        column
+        for column in df.columns
+        if not ignore_project_metadata or not is_project_metadata_variable(column)
+    ]
+    normalized_df = df.loc[:, columns].copy()
+    for column in normalized_df.columns:
+        normalized_df[column] = normalized_df[column].map(
+            lambda value: normalize_answer(value) or ""
+        )
+    payload = normalized_df.to_json(orient="split", date_format="iso", default_handler=str)
+    return normalized_hash(payload)
+
+
+def respondent_id_overlap_stats(
+    new_hashes: list[str],
+    saved_hashes: list[str],
+) -> dict[str, float | int]:
+    new_set = set(new_hashes)
+    saved_set = set(saved_hashes)
+    overlap_count = len(new_set & saved_set)
+    new_count = len(new_set)
+    saved_count = len(saved_set)
+    new_overlap = overlap_count / new_count if new_count else 0
+    saved_overlap = overlap_count / saved_count if saved_count else 0
+    return {
+        "overlap_count": overlap_count,
+        "new_count": new_count,
+        "saved_count": saved_count,
+        "new_overlap": new_overlap,
+        "saved_overlap": saved_overlap,
+        "max_overlap": max(new_overlap, saved_overlap),
+    }
+
+
+def duplicate_match_label(match: dict | None) -> str:
+    if not match:
+        return ""
+
+    record = match.get("record", {})
+    if match.get("method") == "respondent_id_overlap":
+        return (
+            f"{match.get('overlap_percent', 0):.1f}% respondent-ID overlap with "
+            f"{record.get('uploaded_file', NOT_AVAILABLE)} "
+            f"({record.get('dataset_id', NOT_AVAILABLE)})"
+        )
+
+    return (
+        "Exact data-content match with "
+        f"{record.get('uploaded_file', NOT_AVAILABLE)} "
+        f"({record.get('dataset_id', NOT_AVAILABLE)})"
+    )
+
+
+def norm_database_dataset_path(dataset_id: str) -> Path:
+    return NORM_DATABASE_DATASETS_DIR / f"{dataset_id}.xlsx"
+
+
+def find_norm_database_duplicate_record(
+    records: list[dict],
+    new_record: dict,
+    overlap_threshold: float = DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
+) -> dict | None:
+    new_hashes = new_record.get("respondent_id_hashes") or []
+    new_content_fingerprint = new_record.get("data_content_fingerprint")
+
+    for saved_record in records:
+        saved_hashes = saved_record.get("respondent_id_hashes") or []
+        if new_hashes and saved_hashes:
+            stats = respondent_id_overlap_stats(new_hashes, saved_hashes)
+            if stats["max_overlap"] >= overlap_threshold:
+                return {
+                    "record": saved_record,
+                    "method": "respondent_id_overlap",
+                    "overlap_percent": stats["max_overlap"] * 100,
+                    **stats,
+                }
+            continue
+
+        saved_content_fingerprints = {
+            saved_record.get("data_content_fingerprint"),
+            saved_record.get("full_data_content_fingerprint"),
+        }
+        if new_content_fingerprint and new_content_fingerprint in saved_content_fingerprints:
+            return {
+                "record": saved_record,
+                "method": "data_content_fingerprint",
+                "overlap_percent": 100,
+            }
+
+        if (
+            new_record.get("upload_fingerprint")
+            and saved_record.get("upload_fingerprint") == new_record.get("upload_fingerprint")
+        ):
+            return {
+                "record": saved_record,
+                "method": "legacy_upload_fingerprint",
+                "overlap_percent": 100,
+            }
+
+    return None
+
+
+def norm_database_record_for_upload(
+    workbook_bytes: bytes,
+    uploaded_file_name: str | None,
+    data_sheet: str | None,
+    data: pd.DataFrame,
+    group_column: str,
+    control_label: str,
+    test_label: str,
+    norm_questions: list[str],
+    included_mappings: dict[str, str],
+    denominator_settings: dict[str, str],
+    question_labels: dict[str, str] | None = None,
+) -> dict:
+    upload_fingerprint = norm_upload_fingerprint(workbook_bytes, data_sheet)
+    respondent_id_column, respondent_id_hashes = respondent_id_hashes_for_data(
+        data,
+        question_labels,
+    )
+    content_fingerprint = dataframe_content_fingerprint(data)
+    full_content_fingerprint = dataframe_content_fingerprint(data, ignore_project_metadata=False)
+    dataset_id = (
+        normalized_hash("|".join(respondent_id_hashes))[:16]
+        if respondent_id_hashes
+        else content_fingerprint[:16]
+    )
+    metadata_values = project_metadata_values(data)
+    return {
+        "dataset_id": dataset_id,
+        "upload_fingerprint": upload_fingerprint,
+        "data_content_fingerprint": content_fingerprint,
+        "full_data_content_fingerprint": full_content_fingerprint,
+        "respondent_id_column": respondent_id_column or NOT_AVAILABLE,
+        "respondent_id_count": len(respondent_id_hashes),
+        "respondent_id_hashes": respondent_id_hashes,
+        "duplicate_overlap_threshold": DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
+        "uploaded_file": uploaded_file_name or NOT_AVAILABLE,
+        "data_sheet": data_sheet or NOT_AVAILABLE,
+        "row_count": int(len(data)),
+        "column_count": int(len(data.columns)),
+        "norm_count": int(len(norm_questions)),
+        "group_column": group_column,
+        "control_label": control_label,
+        "test_label": test_label,
+        "metadata_values": metadata_values,
+        "norm_mappings": {
+            question: included_mappings.get(question, question)
+            for question in norm_questions
+        },
+        "denominator_settings": {
+            question: denominator_settings.get(question, DEFAULT_DENOMINATOR)
+            for question in norm_questions
+        },
+    }
+
+
+def norm_database_duplicate_probe_for_data(
+    workbook_bytes: bytes,
+    uploaded_file_name: str | None,
+    data_sheet: str | None,
+    data: pd.DataFrame,
+    question_labels: dict[str, str] | None = None,
+) -> dict:
+    respondent_id_column, respondent_id_hashes = respondent_id_hashes_for_data(
+        data,
+        question_labels,
+    )
+    content_fingerprint = dataframe_content_fingerprint(data)
+    full_content_fingerprint = dataframe_content_fingerprint(data, ignore_project_metadata=False)
+    return {
+        "dataset_id": (
+            normalized_hash("|".join(respondent_id_hashes))[:16]
+            if respondent_id_hashes
+            else content_fingerprint[:16]
+        ),
+        "upload_fingerprint": norm_upload_fingerprint(workbook_bytes, data_sheet),
+        "data_content_fingerprint": content_fingerprint,
+        "full_data_content_fingerprint": full_content_fingerprint,
+        "respondent_id_column": respondent_id_column or NOT_AVAILABLE,
+        "respondent_id_count": len(respondent_id_hashes),
+        "respondent_id_hashes": respondent_id_hashes,
+        "uploaded_file": uploaded_file_name or NOT_AVAILABLE,
+        "data_sheet": data_sheet or NOT_AVAILABLE,
+        "row_count": int(len(data)),
+        "column_count": int(len(data.columns)),
+    }
+
+
+def norm_database_rules_for_upload(
+    source_questions: list[str],
+    norm_questions: list[str],
+    included_mappings: dict[str, str],
+    group_column: str,
+    control_label: str,
+    test_label: str,
+    denominator_settings: dict[str, str],
+    split_multi_select: bool,
+    delimiter: str,
+    response_labels: dict[str, dict[str, str]],
+    question_labels: dict[str, str],
+    box_score_settings: dict[str, list[str]],
+    saved_box_score_settings: dict[str, list[str]],
+    question_type_settings: dict[str, str],
+    saved_question_type_settings: dict[str, str],
+) -> dict:
+    norm_rules = []
+    norm_question_set = set(norm_questions)
+    for question in source_questions:
+        is_included = question in norm_question_set
+        norm_rules.append(
+            {
+                "Source variable": question,
+                "Include": is_included,
+                "Norm / benchmark": (
+                    included_mappings.get(question, question)
+                    if is_included
+                    else NA_NORM_OPTION
+                ),
+                "Denominator": denominator_settings.get(question, DEFAULT_DENOMINATOR),
+                "Question Type": question_type_settings.get(
+                    question,
+                    saved_question_type_settings.get(question, "Single-Select"),
+                ),
+                "Box scores": ";".join(
+                    box_score_settings.get(
+                        question,
+                        saved_box_score_settings.get(question, []),
+                    )
+                ),
+            }
+        )
+
+    return {
+        "version": "1",
+        "group_column": group_column,
+        "control_label": control_label,
+        "test_label": test_label,
+        "split_multi_select": split_multi_select,
+        "delimiter": delimiter,
+        "norm_rules": norm_rules,
+        "response_labels": response_labels,
+        "question_labels": question_labels,
+    }
+
+
+def flatten_norm_database_record(record: dict) -> dict:
+    metadata_values = record.get("metadata_values", {})
+    row = {
+        "Dataset ID": record.get("dataset_id", NOT_AVAILABLE),
+        "Saved at": record.get("saved_at", NOT_AVAILABLE),
+        "Uploaded file": record.get("uploaded_file", NOT_AVAILABLE),
+        "Data sheet": record.get("data_sheet", NOT_AVAILABLE),
+        "Rows": record.get("row_count", NOT_AVAILABLE),
+        "Columns": record.get("column_count", NOT_AVAILABLE),
+        "Norms": record.get("norm_count", NOT_AVAILABLE),
+        "Control/test group column": record.get("group_column", NOT_AVAILABLE),
+        "Control label": record.get("control_label", NOT_AVAILABLE),
+        "Test label": record.get("test_label", NOT_AVAILABLE),
+        "Respondent ID column": record.get("respondent_id_column", NOT_AVAILABLE),
+        "Respondent IDs": record.get("respondent_id_count", NOT_AVAILABLE),
+    }
+    for variable in PROJECT_METADATA_VARIABLES:
+        row[variable] = metadata_values.get(variable, NOT_AVAILABLE)
+    return row
+
+
+def add_norm_database_context(
+    table: pd.DataFrame,
+    record: dict,
+    metric: str,
+    source_question: str,
+) -> pd.DataFrame:
+    metadata_values = record.get("metadata_values", {})
+    context = {
+        "Dataset ID": record.get("dataset_id", NOT_AVAILABLE),
+        "Saved at": record.get("saved_at", NOT_AVAILABLE),
+        "Uploaded file": record.get("uploaded_file", NOT_AVAILABLE),
+        "Data sheet": record.get("data_sheet", NOT_AVAILABLE),
+        "Metric": metric,
+        "Source variable": source_question,
+        "Control/test group column": record.get("group_column", NOT_AVAILABLE),
+        "Control label": record.get("control_label", NOT_AVAILABLE),
+        "Test label": record.get("test_label", NOT_AVAILABLE),
+    }
+    for variable in PROJECT_METADATA_VARIABLES:
+        context[variable] = metadata_values.get(variable, NOT_AVAILABLE)
+
+    context_rows = pd.DataFrame([context] * len(table))
+    return pd.concat([context_rows, table.reset_index(drop=True)], axis=1)
+
+
+def contextualize_norm_database_tables(
+    tables: dict[str, pd.DataFrame],
+    record: dict,
+) -> pd.DataFrame:
+    contextualized_tables = []
+    for table_key, table in tables.items():
+        metric, source_question = (
+            table_key.split("__", 1)
+            if "__" in table_key
+            else (table_key, table_key)
+        )
+        contextualized_tables.append(
+            add_norm_database_context(table, record, metric, source_question)
+        )
+
+    if not contextualized_tables:
+        return pd.DataFrame()
+    return pd.concat(contextualized_tables, ignore_index=True)
+
+
+def write_norm_dataset_rules(
+    writer: pd.ExcelWriter,
+    rules: dict,
+) -> None:
+    pd.DataFrame(
+        [
+            {"Rule": "version", "Value": rules.get("version", "1")},
+            {"Rule": "group_column", "Value": rules.get("group_column", "")},
+            {"Rule": "control_label", "Value": rules.get("control_label", "")},
+            {"Rule": "test_label", "Value": rules.get("test_label", "")},
+            {"Rule": "split_multi_select", "Value": str(rules.get("split_multi_select", False))},
+            {"Rule": "delimiter", "Value": rules.get("delimiter", ";")},
+        ]
+    ).to_excel(writer, sheet_name=NORM_DATASET_RULES_SHEET, index=False)
+
+    pd.DataFrame(
+        rules.get("norm_rules", []),
+        columns=[
+            "Source variable",
+            "Include",
+            "Norm / benchmark",
+            "Denominator",
+            "Question Type",
+            "Box scores",
+        ],
+    ).to_excel(writer, sheet_name=NORM_DATASET_NORM_RULES_SHEET, index=False)
+
+    pd.DataFrame(
+        [
+            {"Source variable": question, "Question label": label}
+            for question, label in rules.get("question_labels", {}).items()
+        ],
+        columns=["Source variable", "Question label"],
+    ).to_excel(writer, sheet_name=NORM_DATASET_QUESTION_LABELS_SHEET, index=False)
+
+    response_label_rows = []
+    for question, labels in rules.get("response_labels", {}).items():
+        for value, label in labels.items():
+            response_label_rows.append(
+                {
+                    "Source variable": question,
+                    "Response value": value,
+                    "Response label": label,
+                }
+            )
+    pd.DataFrame(
+        response_label_rows,
+        columns=["Source variable", "Response value", "Response label"],
+    ).to_excel(writer, sheet_name=NORM_DATASET_RESPONSE_LABELS_SHEET, index=False)
+
+
+def read_norm_dataset_rules(dataset_path: Path) -> dict | None:
+    try:
+        rules_df = pd.read_excel(dataset_path, sheet_name=NORM_DATASET_RULES_SHEET, dtype=object)
+        norm_rules_df = pd.read_excel(
+            dataset_path,
+            sheet_name=NORM_DATASET_NORM_RULES_SHEET,
+            dtype=object,
+        )
+    except Exception:
+        return None
+
+    rule_lookup = {
+        normalize_answer(row.get("Rule")): normalize_answer(row.get("Value"))
+        for _index, row in rules_df.iterrows()
+        if normalize_answer(row.get("Rule"))
+    }
+
+    question_labels: dict[str, str] = {}
+    try:
+        question_labels_df = pd.read_excel(
+            dataset_path,
+            sheet_name=NORM_DATASET_QUESTION_LABELS_SHEET,
+            dtype=object,
+        )
+        for _index, row in question_labels_df.iterrows():
+            question = normalize_answer(row.get("Source variable"))
+            label = normalize_answer(row.get("Question label"))
+            if question and label:
+                question_labels[question] = label
+    except Exception:
+        question_labels = {}
+
+    response_labels: dict[str, dict[str, str]] = {}
+    try:
+        response_labels_df = pd.read_excel(
+            dataset_path,
+            sheet_name=NORM_DATASET_RESPONSE_LABELS_SHEET,
+            dtype=object,
+        )
+        for _index, row in response_labels_df.iterrows():
+            question = normalize_answer(row.get("Source variable"))
+            value = normalize_answer(row.get("Response value"))
+            label = normalize_answer(row.get("Response label"))
+            if question and value and label:
+                response_labels.setdefault(question, {})[value] = label
+    except Exception:
+        response_labels = {}
+
+    norm_rules = []
+    for _index, row in norm_rules_df.iterrows():
+        source_variable = normalize_answer(row.get("Source variable"))
+        if not source_variable:
+            continue
+        box_scores = [
+            score
+            for score in re.split(r"[;,]", normalize_answer(row.get("Box scores")) or "")
+            if score in BOX_SCORE_OPTIONS
+        ]
+        norm_rules.append(
+            {
+                "Source variable": source_variable,
+                "Include": str(row.get("Include", True)).lower() != "false",
+                "Norm / benchmark": normalize_answer(row.get("Norm / benchmark")) or source_variable,
+                "Denominator": (
+                    normalize_answer(row.get("Denominator"))
+                    if normalize_answer(row.get("Denominator")) in DENOMINATOR_OPTIONS
+                    else DEFAULT_DENOMINATOR
+                ),
+                "Question Type": normalize_question_type(row.get("Question Type")),
+                "Box scores": ";".join(box_scores),
+            }
+        )
+
+    return {
+        "version": rule_lookup.get("version", "1"),
+        "group_column": rule_lookup.get("group_column", ""),
+        "control_label": rule_lookup.get("control_label", ""),
+        "test_label": rule_lookup.get("test_label", ""),
+        "split_multi_select": str(rule_lookup.get("split_multi_select", "False")).lower() == "true",
+        "delimiter": rule_lookup.get("delimiter", ";"),
+        "norm_rules": norm_rules,
+        "response_labels": response_labels,
+        "question_labels": question_labels,
+    }
+
+
+def write_norm_dataset_workbook(
+    record: dict,
+    tables: dict[str, pd.DataFrame],
+    source_data: pd.DataFrame | None = None,
+    rules: dict | None = None,
+) -> None:
+    ensure_norm_database_dirs()
+    dataset_path = norm_database_dataset_path(record["dataset_id"])
+    contextualized_table = normalize_lift_output_table(
+        contextualize_norm_database_tables(tables, record)
+    )
+
+    with pd.ExcelWriter(dataset_path, engine="openpyxl") as writer:
+        pd.DataFrame([flatten_norm_database_record(record)]).to_excel(
+            writer,
+            sheet_name="Dataset",
+            index=False,
+        )
+        contextualized_table.to_excel(writer, sheet_name="Norm Tables", index=False)
+        if source_data is not None:
+            source_data.to_excel(writer, sheet_name=NORM_DATASET_RESPONDENT_SHEET, index=False)
+        if rules is not None:
+            write_norm_dataset_rules(writer, rules)
+
+
+def refresh_norm_database_workbook(records: list[dict]) -> None:
+    ensure_norm_database_dirs()
+    dataset_rows = [flatten_norm_database_record(record) for record in records]
+    norm_tables = []
+
+    for record in records:
+        dataset_path = norm_database_dataset_path(record.get("dataset_id", ""))
+        if not dataset_path.exists():
+            continue
+        try:
+            norm_tables.append(
+                normalize_lift_output_table(
+                    pd.read_excel(dataset_path, sheet_name="Norm Tables")
+                )
+            )
+        except Exception:
+            continue
+
+    with pd.ExcelWriter(NORM_DATABASE_WORKBOOK_PATH, engine="openpyxl") as writer:
+        pd.DataFrame(dataset_rows).to_excel(writer, sheet_name="Datasets", index=False)
+        if norm_tables:
+            saved_norm_tables = normalize_lift_output_table(
+                pd.concat(norm_tables, ignore_index=True)
+            )
+            saved_norm_tables.to_excel(
+                writer,
+                sheet_name="All Norms",
+                index=False,
+            )
+        else:
+            pd.DataFrame().to_excel(writer, sheet_name="All Norms", index=False)
+
+
+def save_norm_dataset_to_database(
+    record: dict,
+    tables: dict[str, pd.DataFrame],
+    source_data: pd.DataFrame | None = None,
+    rules: dict | None = None,
+    replace_existing: bool = False,
+) -> tuple[bool, str]:
+    if not tables:
+        return False, "No norm tables are available to save."
+
+    records = load_norm_database_manifest()
+    duplicate_match = find_norm_database_duplicate_record(
+        records,
+        record,
+        DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
+    )
+    existing_index = (
+        records.index(duplicate_match["record"])
+        if duplicate_match and duplicate_match.get("record") in records
+        else None
+    )
+    if existing_index is not None and not replace_existing:
+        return False, f"Possible duplicate upload: {duplicate_match_label(duplicate_match)}."
+
+    saved_record = {
+        **record,
+        "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if existing_index is not None:
+        saved_record["dataset_id"] = records[existing_index].get(
+            "dataset_id",
+            saved_record["dataset_id"],
+        )
+    write_norm_dataset_workbook(saved_record, tables, source_data, rules)
+
+    if existing_index is None:
+        records.append(saved_record)
+    else:
+        records[existing_index] = saved_record
+
+    save_norm_database_manifest(records)
+    refresh_norm_database_workbook(records)
+    return True, "Dataset has been added."
+
+
+def render_norm_database_save_controls(
+    record: dict,
+    tables: dict[str, pd.DataFrame],
+    source_data: pd.DataFrame,
+    rules: dict,
+    standards_change_issues: list[dict] | None = None,
+    standards_change_confirmed: bool = True,
+) -> None:
+    st.subheader("Save to norms database")
+    st.caption(
+        "Saves the full audited upload, not temporary table filters. "
+        "Duplicate uploads are detected by respondent-ID overlap when available."
+    )
+
+    saved_records = load_norm_database_manifest()
+    duplicate_match = find_norm_database_duplicate_record(
+        saved_records,
+        record,
+        DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
+    )
+    existing_record = duplicate_match.get("record") if duplicate_match else None
+    standards_change_issues = standards_change_issues or []
+    standards_change_blocked = bool(standards_change_issues) and not standards_change_confirmed
+
+    status_cols = st.columns(3)
+    status_cols[0].metric("Saved datasets", f"{len(saved_records):,}")
+    status_cols[1].metric("Rows to save", f"{record.get('row_count', 0):,}")
+    status_cols[2].metric("Norms to save", f"{record.get('norm_count', 0):,}")
+    if record.get("respondent_id_count", 0):
+        st.caption(
+            "Duplicate check: "
+            f"`{record.get('respondent_id_column')}` respondent IDs, "
+            f"{DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD:.0%} overlap threshold."
+        )
+    else:
+        st.caption(
+            "Duplicate check: no respondent ID field found, so the app will only "
+            "block exact cleaned-data matches."
+        )
+
+    if standards_change_issues:
+        if standards_change_blocked:
+            st.warning(
+                "This upload changes box-score rules from previous saved norms. "
+                "Confirm the standards change on the Survey Question Audit page before saving."
+            )
+        else:
+            st.info(
+                "This upload has confirmed box-score rule changes. After saving, review "
+                "Saved datasets and update previous datasets so the metrics stay consistent."
+            )
+
+    if existing_record:
+        st.warning(
+            "Possible duplicate upload detected: "
+            f"{duplicate_match_label(duplicate_match)}. "
+            f"Saved at {existing_record.get('saved_at', NOT_AVAILABLE)} "
+            f"as dataset {existing_record.get('dataset_id', NOT_AVAILABLE)}."
+        )
+        replace_existing = st.checkbox(
+            "Replace the existing saved dataset",
+            key="replace_existing_norm_dataset",
+        )
+        if st.button(
+            "Replace saved dataset",
+            disabled=not replace_existing or standards_change_blocked,
+            use_container_width=True,
+        ):
+            success, message = save_norm_dataset_to_database(
+                record,
+                tables,
+                source_data,
+                rules,
+                replace_existing=True,
+            )
+            if success:
+                st.success("Dataset has been updated.")
+            else:
+                st.error(message)
+    else:
+        if st.button(
+            "Save dataset to norms database",
+            disabled=standards_change_blocked,
+            use_container_width=True,
+        ):
+            success, message = save_norm_dataset_to_database(
+                record,
+                tables,
+                source_data,
+                rules,
+            )
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+
+def saved_dataset_option_label(record: dict) -> str:
+    return (
+        f"{record.get('uploaded_file', NOT_AVAILABLE)} | "
+        f"{record.get('data_sheet', NOT_AVAILABLE)} | "
+        f"{record.get('dataset_id', NOT_AVAILABLE)}"
+    )
+
+
+def saved_dataset_rules_editor_frame(rules: dict, data_columns: list[str]) -> pd.DataFrame:
+    rules_by_source = {
+        normalize_answer(rule.get("Source variable")): rule
+        for rule in rules.get("norm_rules", [])
+        if normalize_answer(rule.get("Source variable"))
+    }
+    rows = []
+
+    for source_variable in data_columns:
+        rule = rules_by_source.get(source_variable, {})
+        box_scores = [
+            score
+            for score in re.split(r"[;,]", normalize_answer(rule.get("Box scores")) or "")
+            if score in BOX_SCORE_OPTIONS
+        ]
+        include = bool(rule.get("Include", False))
+        norm = normalize_answer(rule.get("Norm / benchmark")) or source_variable
+        rows.append(
+            {
+                "Include": include,
+                "Source variable": source_variable,
+                "Norm / benchmark": norm if include else NA_NORM_OPTION,
+                "Denominator": (
+                    rule.get("Denominator")
+                    if rule.get("Denominator") in DENOMINATOR_OPTIONS
+                    else DEFAULT_DENOMINATOR
+                ),
+                "Question Type": normalize_question_type(rule.get("Question Type")),
+                "T2B": "T2B" in box_scores,
+                "T3B": "T3B" in box_scores,
+                "B2B": "B2B" in box_scores,
+                "B3B": "B3B" in box_scores,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def normalize_saved_dataset_rules_editor(
+    editor_df: pd.DataFrame,
+) -> tuple[dict[str, str], dict[str, str], dict[str, list[str]], dict[str, str], list[dict]]:
+    included_mappings: dict[str, str] = {}
+    denominator_settings: dict[str, str] = {}
+    box_score_settings: dict[str, list[str]] = {}
+    question_type_settings: dict[str, str] = {}
+    norm_rules: list[dict] = []
+
+    for _index, row in editor_df.iterrows():
+        source_variable = normalize_answer(row.get("Source variable"))
+        if not source_variable:
+            continue
+
+        include = bool(row.get("Include"))
+        mapped_norm = normalize_answer(row.get("Norm / benchmark")) or source_variable
+        denominator = normalize_answer(row.get("Denominator"))
+        if denominator not in DENOMINATOR_OPTIONS:
+            denominator = DEFAULT_DENOMINATOR
+
+        question_type = normalize_question_type(row.get("Question Type"))
+        selected_box_scores = [
+            score
+            for score in BOX_SCORE_OPTIONS
+            if bool(row.get(score))
+        ]
+
+        if include and mapped_norm != NA_NORM_OPTION:
+            included_mappings[source_variable] = mapped_norm
+            denominator_settings[source_variable] = denominator
+            box_score_settings[source_variable] = selected_box_scores
+            question_type_settings[source_variable] = question_type
+
+        norm_rules.append(
+            {
+                "Source variable": source_variable,
+                "Include": include and mapped_norm != NA_NORM_OPTION,
+                "Norm / benchmark": (
+                    mapped_norm
+                    if include and mapped_norm != NA_NORM_OPTION
+                    else NA_NORM_OPTION
+                ),
+                "Denominator": denominator,
+                "Question Type": question_type,
+                "Box scores": ";".join(selected_box_scores),
+            }
+        )
+
+    return (
+        included_mappings,
+        denominator_settings,
+        box_score_settings,
+        question_type_settings,
+        norm_rules,
+    )
+
+
+def update_saved_norm_dataset_rules(
+    record: dict,
+    source_data: pd.DataFrame,
+    updated_rules: dict,
+    tables: dict[str, pd.DataFrame],
+) -> tuple[bool, str]:
+    records = load_norm_database_manifest()
+    dataset_id = record.get("dataset_id")
+    record_index = next(
+        (
+            index
+            for index, saved_record in enumerate(records)
+            if saved_record.get("dataset_id") == dataset_id
+        ),
+        None,
+    )
+    if record_index is None:
+        return False, "Saved dataset record was not found in the manifest."
+
+    included_mappings = {
+        rule["Source variable"]: rule["Norm / benchmark"]
+        for rule in updated_rules.get("norm_rules", [])
+        if rule.get("Include") and rule.get("Norm / benchmark") != NA_NORM_OPTION
+    }
+    denominator_settings = {
+        rule["Source variable"]: rule.get("Denominator", DEFAULT_DENOMINATOR)
+        for rule in updated_rules.get("norm_rules", [])
+        if rule.get("Include") and rule.get("Norm / benchmark") != NA_NORM_OPTION
+    }
+    updated_record = {
+        **record,
+        "row_count": int(len(source_data)),
+        "column_count": int(len(source_data.columns)),
+        "norm_count": int(len(included_mappings)),
+        "group_column": updated_rules.get("group_column", record.get("group_column")),
+        "control_label": updated_rules.get("control_label", record.get("control_label")),
+        "test_label": updated_rules.get("test_label", record.get("test_label")),
+        "metadata_values": project_metadata_values(source_data),
+        "norm_mappings": included_mappings,
+        "denominator_settings": denominator_settings,
+        "rules_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    write_norm_dataset_workbook(updated_record, tables, source_data, updated_rules)
+    records[record_index] = updated_record
+    save_norm_database_manifest(records)
+    refresh_norm_database_workbook(records)
+    return True, "Saved dataset rules updated and norm tables regenerated."
+
+
+def render_saved_datasets_tab() -> None:
+    st.subheader("Saved datasets")
+    st.write(
+        "Review saved norm datasets and edit their saved calculation rules when "
+        "standards change."
+    )
+
+    records = load_norm_database_manifest()
+    if not records:
+        st.info("No saved norm datasets are available yet.")
+        return
+
+    st.dataframe(
+        pd.DataFrame(flatten_norm_database_record(record) for record in records),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    selected_record = st.selectbox(
+        "Dataset to edit",
+        records,
+        format_func=saved_dataset_option_label,
+    )
+    if not selected_record:
+        return
+
+    dataset_path = norm_database_dataset_path(selected_record.get("dataset_id", ""))
+    if not dataset_path.exists():
+        st.error("The saved dataset workbook is missing.")
+        return
+
+    rules = read_norm_dataset_rules(dataset_path)
+    try:
+        source_data = pd.read_excel(
+            dataset_path,
+            sheet_name=NORM_DATASET_RESPONDENT_SHEET,
+            dtype=object,
+        )
+    except Exception:
+        source_data = None
+
+    if rules is None or source_data is None:
+        st.warning(
+            "This saved dataset was created before editable rules were stored. "
+            "Re-save or replace the dataset from the original upload to enable rule edits."
+        )
+        return
+
+    columns = list(source_data.columns)
+    saved_group_column = rules.get("group_column") or selected_record.get("group_column")
+    group_index = columns.index(saved_group_column) if saved_group_column in columns else 0
+    group_column = st.selectbox(
+        "Control/test group column",
+        columns,
+        index=group_index,
+        key=f"saved_group_{selected_record.get('dataset_id')}",
+    )
+    group_labels = (
+        source_data[group_column]
+        .map(normalize_answer)
+        .dropna()
+        .drop_duplicates()
+        .tolist()
+    )
+    if len(group_labels) < 2:
+        st.error("The saved group column needs at least two non-empty labels.")
+        return
+
+    default_control = rules.get("control_label") or selected_record.get("control_label")
+    default_test = rules.get("test_label") or selected_record.get("test_label")
+    control_index = group_labels.index(default_control) if default_control in group_labels else 0
+    test_index = group_labels.index(default_test) if default_test in group_labels else min(1, len(group_labels) - 1)
+    control_col, test_col = st.columns(2)
+    control_label = control_col.selectbox(
+        "Control label",
+        group_labels,
+        index=control_index,
+        key=f"saved_control_{selected_record.get('dataset_id')}",
+    )
+    test_label = test_col.selectbox(
+        "Test label",
+        group_labels,
+        index=test_index,
+        key=f"saved_test_{selected_record.get('dataset_id')}",
+    )
+
+    data_columns = [
+        column
+        for column in columns
+        if column != group_column and not is_project_metadata_variable(column)
+    ]
+    rules_frame = saved_dataset_rules_editor_frame(rules, data_columns)
+    edited_rules = st.data_editor(
+        rules_frame,
+        key=f"saved_rules_editor_{selected_record.get('dataset_id')}",
+        use_container_width=True,
+        hide_index=True,
+        num_rows="fixed",
+        column_config={
+            "Include": st.column_config.CheckboxColumn("Include", width="small"),
+            "Source variable": st.column_config.TextColumn(
+                "Source variable",
+                disabled=True,
+                width=180,
+            ),
+            "Norm / benchmark": st.column_config.TextColumn(
+                "Norm / benchmark",
+                width=220,
+            ),
+            "Denominator": st.column_config.SelectboxColumn(
+                "Denominator",
+                options=DENOMINATOR_OPTIONS,
+                required=True,
+                width=150,
+            ),
+            "Question Type": st.column_config.SelectboxColumn(
+                "Question Type",
+                options=QUESTION_TYPES,
+                required=True,
+                width=170,
+            ),
+        },
+    )
+
+    (
+        included_mappings,
+        denominator_settings,
+        box_score_settings,
+        question_type_settings,
+        norm_rules,
+    ) = normalize_saved_dataset_rules_editor(edited_rules)
+    st.caption(f"Included norms after edit: {len(included_mappings):,}")
+
+    if st.button("Save updated dataset rules", use_container_width=True):
+        if control_label == test_label:
+            st.error("Control and test labels must be different.")
+            return
+        if not included_mappings:
+            st.error("At least one saved rule must be included.")
+            return
+
+        updated_rules = {
+            **rules,
+            "group_column": group_column,
+            "control_label": control_label,
+            "test_label": test_label,
+            "norm_rules": norm_rules,
+        }
+        tables = build_norm_tables(
+            source_data,
+            list(included_mappings.keys()),
+            included_mappings,
+            group_column,
+            control_label,
+            test_label,
+            denominator_settings,
+            rules.get("split_multi_select", False),
+            rules.get("delimiter", ";"),
+            rules.get("response_labels", {}),
+            rules.get("question_labels", {}),
+            box_score_settings,
+            {},
+            question_type_settings,
+            {},
+        )
+        success, message = update_saved_norm_dataset_rules(
+            selected_record,
+            source_data,
+            updated_rules,
+            tables,
+        )
+        if success:
+            st.success(message)
+        else:
+            st.error(message)
+
+
+def load_saved_norm_tables() -> pd.DataFrame:
+    if not NORM_DATABASE_WORKBOOK_PATH.exists():
+        return pd.DataFrame()
+
+    try:
+        return normalize_lift_output_table(
+            pd.read_excel(NORM_DATABASE_WORKBOOK_PATH, sheet_name="All Norms", dtype=object)
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def saved_norm_database_download(
+    saved_tables: pd.DataFrame,
+    saved_records: list[dict],
+) -> bytes:
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame(
+            [flatten_norm_database_record(record) for record in saved_records]
+        ).to_excel(writer, sheet_name="Datasets", index=False)
+        normalize_lift_output_table(saved_tables).to_excel(
+            writer,
+            sheet_name="All Norms",
+            index=False,
+        )
+    return output.getvalue()
+
+
+def render_saved_norm_tables_review() -> None:
+    st.subheader("Saved norm tables")
+    st.caption(
+        "These tables come from the saved norms database. Upload a workbook only when "
+        "you want to audit and add or replace a dataset."
+    )
+    saved_tables = load_saved_norm_tables()
+    saved_records = load_norm_database_manifest()
+
+    metric_cols = st.columns(3)
+    metric_cols[0].metric("Saved datasets", f"{len(saved_records):,}")
+    metric_cols[1].metric("Saved rows", f"{len(saved_tables):,}")
+    metric_cols[2].metric(
+        "Saved metrics",
+        f"{saved_tables['Metric'].nunique():,}" if "Metric" in saved_tables.columns else "0",
+    )
+
+    if saved_tables.empty:
+        st.info("No saved norm tables are available yet.")
+        return
+
+    table_columns = [
+        column
+        for column in [
+            "Response option",
+            "Control",
+            "Test",
+            "Lift",
+            "Significance result",
+        ]
+        if column in saved_tables.columns
+    ]
+    if "Metric" not in saved_tables.columns or not table_columns:
+        render_norm_table(saved_tables)
+    else:
+        for metric, metric_table in saved_tables.groupby("Metric", sort=False):
+            st.subheader(str(metric))
+            source_variables = (
+                metric_table["Source variable"]
+                .map(normalize_answer)
+                .dropna()
+                .drop_duplicates()
+                .tolist()
+                if "Source variable" in metric_table.columns
+                else []
+            )
+            if source_variables:
+                st.caption(f"Source variable: {', '.join(source_variables)}")
+            render_norm_table(metric_table[table_columns].reset_index(drop=True))
+
+    if NORM_DATABASE_WORKBOOK_PATH.exists():
+        st.download_button(
+            "Download saved norms Excel",
+            data=saved_norm_database_download(saved_tables, saved_records),
+            file_name="saved_norm_tables.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+
+def render_norm_table(table: pd.DataFrame) -> None:
+    display_table = normalize_lift_output_table(table)
+    table_html = display_table.to_html(
+        index=False,
+        border=0,
+        classes="vn-norm-table",
+        escape=True,
+    )
+    st.markdown(
+        f'<div class="vn-norm-table-wrap">{table_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="BLS Norms Database",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
+    apply_bls_theme()
+    render_bls_header()
+
+    audit_tab, mapping_tab, norms_tab, saved_datasets_tab = st.tabs(
+        PAGE_NAMES
+    )
+
+    uploaded_file = None
+    uploaded_file_name = None
+    workbook_bytes = None
+    excel_file = None
+    data_sheet = None
+    data = None
+    label_sheet = NO_LABEL_SHEET
+    review_saved_norms = st.session_state.get("review_saved_norms_mode", False)
+    data_layout = SMART_TABLES_LAYOUT
+    response_labels: dict[str, dict[str, str]] = {}
+    question_labels: dict[str, str] = {}
+    candidate_questions: list[str] = []
+    norm_questions: list[str] = []
+    norm_mappings: dict[str, str] = {}
+    included_mappings: dict[str, str] = {}
+    saved_norm_mappings = load_norm_mapping_settings()
+    saved_box_score_settings = load_box_score_settings()
+    saved_question_type_settings = load_question_type_settings()
+    saved_na_alias_settings = load_na_alias_settings()
+    saved_denominator_settings = load_denominator_settings()
+    prior_norm_rules = load_saved_norm_rule_history()
+    box_score_settings: dict[str, list[str]] = {}
+    question_type_settings: dict[str, str] = {}
+    audit_consistency_issues: list[dict] = []
+    audit_consistency_confirmed = True
+    group_column = None
+    control_label = None
+    test_label = None
+    split_multi_select = False
+    delimiter = ";"
+
+    with audit_tab:
+        render_page_navigation(0, review_saved_norms)
+        st.subheader("Survey Question Audit")
+        st.write(
+            "Upload a workbook, confirm the control/test setup, then review "
+            "which norm or benchmark each question should map to."
+        )
+
+        review_saved_norms = st.checkbox(
+            "Review saved norms without uploading a workbook",
+            help="Use this when you want to inspect saved norm, denominator, and box-score decisions without updating them from a new workbook.",
+            key="review_saved_norms_mode",
+        )
+
+        if review_saved_norms:
+            norm_mappings = saved_norm_mappings
+            box_score_settings = saved_box_score_settings
+            question_type_settings = saved_question_type_settings
+            included_mappings = included_norm_mappings(norm_mappings)
+            norm_questions = list(included_mappings.keys())
+        else:
+            uploaded_file = st.file_uploader(
+                "Survey Excel workbook",
+                type=["xlsx", "xlsm", "xls"],
+            )
+
+            if uploaded_file is None:
+                st.info("Upload a workbook to begin setup, or use the saved-norm review option above.")
+            else:
+                uploaded_file_name = uploaded_file.name
+                workbook_bytes, excel_file = read_excel_workbook(uploaded_file)
+
+        if not review_saved_norms and workbook_bytes is not None and excel_file is not None:
+            data_sheet = st.selectbox("Respondent data sheet", excel_file.sheet_names)
+            data_layout = SMART_TABLES_LAYOUT
+
+            respondent_sheet = read_respondent_sheet(workbook_bytes, data_sheet, data_layout)
+            if respondent_sheet is None:
+                st.stop()
+
+            data = respondent_sheet.dataframe
+            question_labels.update(respondent_sheet.question_labels)
+
+            if data is None or data.empty:
+                st.warning("The selected respondent data sheet is empty or unavailable.")
+            else:
+                metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
+                metric_col_1.metric("Respondent rows", f"{len(data):,}")
+                metric_col_2.metric("Question columns", f"{len(data.columns):,}")
+                metric_col_3.metric(
+                    "Metadata rows removed",
+                    f"{respondent_sheet.metadata_rows_removed:,}",
+                )
+                metric_col_4.metric(
+                    "Metadata variables defaulted NA",
+                    f"{respondent_sheet.metadata_columns_default_na:,}",
+                )
+
+                if respondent_sheet.metadata_columns:
+                    with st.expander("Metadata variables defaulted NA", expanded=False):
+                        st.write(", ".join(str(column) for column in respondent_sheet.metadata_columns))
+
+                label_sheet, response_labels, label_question_labels = auto_detect_response_labels(
+                    workbook_bytes,
+                    excel_file,
+                    data_sheet,
+                )
+                question_labels.update(label_question_labels)
+                upload_duplicate_probe = norm_database_duplicate_probe_for_data(
+                    workbook_bytes,
+                    uploaded_file_name,
+                    data_sheet,
+                    data,
+                    question_labels,
+                )
+                upload_duplicate_match = find_norm_database_duplicate_record(
+                    load_norm_database_manifest(),
+                    upload_duplicate_probe,
+                    DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
+                )
+                if upload_duplicate_match:
+                    st.warning("Dataset already added to norms.")
+
+                data, question_labels = prompt_for_missing_project_metadata(
+                    data,
+                    question_labels,
+                )
+
+                st.subheader("Sample setup")
+                columns = list(data.columns)
+                group_column = st.selectbox(
+                    "Control/test group column",
+                    columns,
+                    index=default_group_column_index(columns),
+                )
+                candidate_questions = [
+                    column
+                    for column in columns
+                    if column != group_column and not is_project_metadata_variable(column)
+                ]
+                audit_signature = hashlib.sha1(
+                    json.dumps([str(column) for column in candidate_questions]).encode("utf-8")
+                ).hexdigest()
+                if st.session_state.get("norm_audit_signature") != audit_signature:
+                    st.session_state.norm_audit_signature = audit_signature
+                    st.session_state.norm_audit_pending_box_score_settings = {}
+                    st.session_state.norm_audit_pending_question_type_settings = {}
+                    st.session_state.norm_audit_editor_version = 0
+
+                group_labels = (
+                    data[group_column]
+                    .map(normalize_answer)
+                    .dropna()
+                    .drop_duplicates()
+                    .tolist()
+                )
+
+                if len(group_labels) < 2:
+                    st.error(
+                        "The selected group column needs at least two non-empty labels."
+                    )
+                else:
+                    control_col, test_col = st.columns(2)
+                    control_label = control_col.selectbox(
+                        "Control label",
+                        group_labels,
+                        format_func=lambda value: display_response_label(
+                            group_column,
+                            value,
+                            response_labels,
+                        ),
+                    )
+                    default_test_index = 1 if len(group_labels) > 1 else 0
+                    test_label = test_col.selectbox(
+                        "Test label",
+                        group_labels,
+                        index=default_test_index,
+                        format_func=lambda value: display_response_label(
+                            group_column,
+                            value,
+                            response_labels,
+                        ),
+                    )
+
+                    if control_label == test_label:
+                        st.error("Control and test labels must be different.")
+
+                st.subheader("Norm / benchmark audit")
+                st.caption(
+                    "The app suggests the closest norm or benchmark from the available "
+                    "norm list. For the first project this defaults to each question's "
+                    "own variable name. Smart Tables metadata variables default to NA. "
+                    "Change the dropdown when needed, check NA to exclude a question, "
+                    "or select T2B/T3B/B2B/B3B to add top/bottom-box norm rows."
+                )
+
+                norm_catalog = build_norm_catalog(
+                    candidate_questions,
+                    saved_norm_mappings,
+                    prior_norm_rules,
+                )
+                norm_options = [NA_NORM_OPTION, *norm_catalog]
+                pending_box_score_settings = st.session_state.get(
+                    "norm_audit_pending_box_score_settings",
+                    {},
+                )
+                pending_question_type_settings = st.session_state.get(
+                    "norm_audit_pending_question_type_settings",
+                    {},
+                )
+                effective_box_score_settings = {
+                    **saved_box_score_settings,
+                    **pending_box_score_settings,
+                }
+                effective_question_type_settings = {
+                    **saved_question_type_settings,
+                    **pending_question_type_settings,
+                }
+                audit_frame = build_norm_audit_frame(
+                    data,
+                    candidate_questions,
+                    question_labels,
+                    response_labels,
+                    saved_norm_mappings,
+                    effective_box_score_settings,
+                    effective_question_type_settings,
+                    saved_na_alias_settings,
+                    split_multi_select,
+                    delimiter,
+                    prior_norm_rules,
+                )
+                if "norm_audit_editor_version" not in st.session_state:
+                    st.session_state.norm_audit_editor_version = 0
+
+                scale_action_cols = st.columns(5)
+                bulk_selection: list[str] | None = None
+                if scale_action_cols[0].button("All scale T2B", use_container_width=True):
+                    bulk_selection = ["T2B"]
+                if scale_action_cols[1].button("All scale T3B", use_container_width=True):
+                    bulk_selection = ["T3B"]
+                if scale_action_cols[2].button("All scale B2B", use_container_width=True):
+                    bulk_selection = ["B2B"]
+                if scale_action_cols[3].button("All scale B3B", use_container_width=True):
+                    bulk_selection = ["B3B"]
+                if scale_action_cols[4].button("Clear scale boxes", use_container_width=True):
+                    bulk_selection = []
+
+                if bulk_selection is not None:
+                    audit_frame = apply_scale_box_score_selection(audit_frame, bulk_selection)
+                    st.session_state.norm_audit_pending_box_score_settings = (
+                        normalize_box_score_audit_editor(audit_frame)
+                    )
+                    st.session_state.norm_audit_pending_question_type_settings = (
+                        normalize_question_type_audit_editor(audit_frame)
+                    )
+                    st.session_state.norm_audit_editor_version += 1
+
+                edited_audit = st.data_editor(
+                    audit_frame,
+                    key=f"norm_audit_editor_{st.session_state.norm_audit_editor_version}",
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="fixed",
+                    column_config={
+                        "NA": st.column_config.CheckboxColumn(
+                            "NA",
+                            help="Exclude this question from the norms database.",
+                            width="small",
+                        ),
+                        "Variable Name": st.column_config.TextColumn(
+                            "Variable Name",
+                            disabled=True,
+                            width=180,
+                        ),
+                        "Question Text": st.column_config.TextColumn(
+                            "Question Text",
+                            disabled=True,
+                            width=420,
+                        ),
+                        "Question Type": st.column_config.SelectboxColumn(
+                            "Question Type",
+                            options=QUESTION_TYPES,
+                            required=True,
+                            width=170,
+                        ),
+                        "Suggested norm/benchmark": st.column_config.TextColumn(
+                            "Suggested norm/benchmark",
+                            disabled=True,
+                            width=220,
+                        ),
+                        "Norm / benchmark": st.column_config.SelectboxColumn(
+                            "Norm / benchmark",
+                            options=norm_options,
+                            required=True,
+                            width=220,
+                        ),
+                        "T2B": st.column_config.CheckboxColumn(
+                            "T2B",
+                            help="Add a Top 2 Box row using the first two ordered scale options.",
+                            width="small",
+                        ),
+                        "T3B": st.column_config.CheckboxColumn(
+                            "T3B",
+                            help="Add a Top 3 Box row using the first three ordered scale options.",
+                            width="small",
+                        ),
+                        "B2B": st.column_config.CheckboxColumn(
+                            "B2B",
+                            help="Add a Bottom 2 Box row using the last two ordered scale options.",
+                            width="small",
+                        ),
+                        "B3B": st.column_config.CheckboxColumn(
+                            "B3B",
+                            help="Add a Bottom 3 Box row using the last three ordered scale options.",
+                            width="small",
+                        ),
+                        "Answer Choices Count": st.column_config.NumberColumn(
+                            "Answer Choices Count",
+                            disabled=True,
+                            width=160,
+                        ),
+                        "Answer Choices": st.column_config.TextColumn(
+                            "Answer Choices",
+                            disabled=True,
+                            width=620,
+                        ),
+                    },
+                )
+                norm_mappings = normalize_norm_audit_editor(edited_audit)
+                box_score_settings = normalize_box_score_audit_editor(edited_audit)
+                question_type_settings = normalize_question_type_audit_editor(edited_audit)
+                st.session_state.norm_audit_pending_box_score_settings = box_score_settings
+                st.session_state.norm_audit_pending_question_type_settings = question_type_settings
+                included_mappings = included_norm_mappings(norm_mappings)
+                norm_questions = list(included_mappings.keys())
+
+                metric_included, metric_excluded, metric_box_rows = st.columns(3)
+                metric_included.metric("Included in norms", f"{len(norm_questions):,}")
+                metric_excluded.metric(
+                    "Marked NA",
+                    f"{len(candidate_questions) - len(norm_questions):,}",
+                )
+                metric_box_rows.metric(
+                    "Box score rows selected",
+                    f"{sum(len(box_score_settings.get(question, [])) for question in norm_questions):,}",
+                )
+
+                audit_consistency_issues = norm_audit_prior_rule_issues(
+                    edited_audit,
+                    prior_norm_rules,
+                )
+                audit_consistency_confirmed = True
+                if audit_consistency_issues:
+                    st.warning(
+                        "Some box-score selections do not match previous saved norms."
+                    )
+                    st.dataframe(
+                        pd.DataFrame(audit_consistency_issues),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    st.info(
+                        "Confirm this only when the standard is intentionally changing. "
+                        "After saving, update previous saved datasets on the Saved datasets "
+                        "page so each metric is measured consistently."
+                    )
+                    audit_consistency_confirmed = st.checkbox(
+                        "Confirm this standards change for this upload",
+                        key=f"norm_audit_consistency_confirmed_{audit_signature}",
+                    )
+
+                if st.button(
+                    "Save audit mapping",
+                    disabled=bool(audit_consistency_issues) and not audit_consistency_confirmed,
+                ):
+                    save_norm_mapping_settings(norm_mappings)
+                    save_box_score_settings(box_score_settings)
+                    save_question_type_settings(question_type_settings)
+                    saved_na_alias_settings = merge_na_alias_settings(
+                        normalize_na_aliases_from_audit_editor(edited_audit)
+                    )
+                    saved_norm_mappings = load_norm_mapping_settings()
+                    saved_box_score_settings = load_box_score_settings()
+                    saved_question_type_settings = load_question_type_settings()
+                    st.session_state.norm_audit_pending_box_score_settings = saved_box_score_settings
+                    st.session_state.norm_audit_pending_question_type_settings = saved_question_type_settings
+                    st.success("Norm / benchmark audit mapping saved.")
+
+                if not norm_questions:
+                    st.info("At least one question must map to a norm or benchmark before tables can be calculated.")
+
+        render_page_navigation(0, review_saved_norms)
+
+    settings = load_denominator_settings()
+    selected_denominators: dict[str, str] = {}
+    setup_complete = (
+        data is not None
+        and not data.empty
+        and group_column is not None
+        and control_label is not None
+        and test_label is not None
+        and control_label != test_label
+        and bool(norm_questions)
+    )
+
+    with mapping_tab:
+        render_page_navigation(1, review_saved_norms)
+        st.subheader("Denominator settings")
+        if review_saved_norms:
+            st.info(
+                "Review mode skips denominator setup. Use Norm tables to review "
+                "saved norms, or Saved datasets to edit saved rules."
+            )
+        elif not norm_questions:
+            st.info("Complete the Survey Question Audit and include at least one mapped norm.")
+        else:
+            st.caption(
+                "Default denominator: Total answering. Total sample uses the same "
+                "base as the Smart Tables Total Base section."
+            )
+
+            for question in norm_questions:
+                current_setting = settings.get(question, DEFAULT_DENOMINATOR)
+                if current_setting not in DENOMINATOR_OPTIONS:
+                    current_setting = DEFAULT_DENOMINATOR
+
+                selected_denominators[question] = st.selectbox(
+                    display_norm_variable_mapping_label(
+                        question,
+                        included_mappings.get(question, question),
+                    ),
+                    DENOMINATOR_OPTIONS,
+                    index=DENOMINATOR_OPTIONS.index(current_setting),
+                    key=setting_key(question),
+                )
+
+            if st.button("Save denominator settings"):
+                persist_denominator_changes(settings, selected_denominators)
+                settings = load_denominator_settings()
+                st.success("Denominator settings saved.")
+
+        render_page_navigation(1, review_saved_norms)
+
+    with norms_tab:
+        render_page_navigation(2, review_saved_norms)
+        if review_saved_norms or data is None:
+            render_saved_norm_tables_review()
+        elif not setup_complete:
+            st.info(
+                "Complete the Survey Question Audit to preview tables for this uploaded "
+                "dataset. The saved norms database is shown when no workbook is active."
+            )
+        else:
+            all_tables: dict[str, pd.DataFrame] = {}
+            filtered_data = render_norm_filter_controls(
+                data,
+                group_column,
+                control_label,
+                test_label,
+                question_labels,
+                response_labels,
+            )
+            effective_denominator_settings = {
+                question: selected_denominators.get(
+                    question,
+                    settings.get(question, DEFAULT_DENOMINATOR),
+                )
+                for question in norm_questions
+            }
+            all_tables = build_norm_tables(
+                filtered_data,
+                norm_questions,
+                included_mappings,
+                group_column,
+                control_label,
+                test_label,
+                effective_denominator_settings,
+                split_multi_select,
+                delimiter,
+                response_labels,
+                question_labels,
+                box_score_settings,
+                saved_box_score_settings,
+                question_type_settings,
+                saved_question_type_settings,
+            )
+
+            if workbook_bytes is not None and data_sheet is not None:
+                full_tables = build_norm_tables(
+                    data,
+                    norm_questions,
+                    included_mappings,
+                    group_column,
+                    control_label,
+                    test_label,
+                    effective_denominator_settings,
+                    split_multi_select,
+                    delimiter,
+                    response_labels,
+                    question_labels,
+                    box_score_settings,
+                    saved_box_score_settings,
+                    question_type_settings,
+                    saved_question_type_settings,
+                )
+                database_record = norm_database_record_for_upload(
+                    workbook_bytes,
+                    uploaded_file_name,
+                    data_sheet,
+                    data,
+                    group_column,
+                    control_label,
+                    test_label,
+                    norm_questions,
+                    included_mappings,
+                    effective_denominator_settings,
+                    question_labels,
+                )
+                database_rules = norm_database_rules_for_upload(
+                    candidate_questions or norm_questions,
+                    norm_questions,
+                    included_mappings,
+                    group_column,
+                    control_label,
+                    test_label,
+                    effective_denominator_settings,
+                    split_multi_select,
+                    delimiter,
+                    response_labels,
+                    question_labels,
+                    box_score_settings,
+                    saved_box_score_settings,
+                    question_type_settings,
+                    saved_question_type_settings,
+                )
+                render_norm_database_save_controls(
+                    database_record,
+                    full_tables,
+                    data,
+                    database_rules,
+                    audit_consistency_issues,
+                    audit_consistency_confirmed,
+                )
+
+            for question in norm_questions:
+                mapped_norm = included_mappings.get(question, question)
+                denominator_setting = effective_denominator_settings.get(
+                    question,
+                    DEFAULT_DENOMINATOR,
+                )
+                norm_table = all_tables.get(f"{mapped_norm}__{question}", pd.DataFrame())
+
+                st.subheader(mapped_norm)
+                st.caption(
+                    f"Source variable: {question} "
+                    f"| Denominator: {denominator_setting}"
+                )
+                render_norm_table(norm_table)
+
+            st.download_button(
+                "Download norm tables Excel",
+                data=norm_tables_to_excel(all_tables),
+                file_name="norm_tables.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+        render_page_navigation(2, review_saved_norms)
+
+    with saved_datasets_tab:
+        render_page_navigation(3, review_saved_norms)
+        render_saved_datasets_tab()
+        render_page_navigation(3, review_saved_norms)
+
+
+if __name__ == "__main__":
+    main()

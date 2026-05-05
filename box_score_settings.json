@@ -1,0 +1,72 @@
+{
+  "Ad Recall": [],
+  "Age": [],
+  "Brand Advocacy": [
+    "T2B"
+  ],
+  "Brand Retention": [
+    "T2B"
+  ],
+  "Brand Sentiment": [
+    "T2B"
+  ],
+  "Category Interest": [
+    "T2B"
+  ],
+  "DistributionChannel": [],
+  "Duration (in seconds)": [],
+  "EndDate": [],
+  "ExternalReference": [],
+  "Finished": [],
+  "Gender": [],
+  "IPAddress": [],
+  "LocationLatitude": [],
+  "LocationLongitude": [],
+  "Media Consumption": [],
+  "OM Feature Awareness": [],
+  "P_Culture": [
+    "T2B"
+  ],
+  "P_Tech Leadership": [
+    "T2B"
+  ],
+  "P_Tech Style": [
+    "T2B"
+  ],
+  "Progress": [],
+  "Purchase Intent": [
+    "T2B"
+  ],
+  "Q_DuplicateRespondent": [],
+  "Q_DuplicateRespondentStatus": [],
+  "Q_RecaptchaError": [],
+  "Q_RecaptchaScore": [],
+  "Q_RecaptchaStatus": [],
+  "Q_RelevantIDDuplicate": [],
+  "Q_RelevantIDDuplicateScore": [],
+  "Q_RelevantIDFraudScore": [],
+  "Q_RelevantIDLastStartDate": [],
+  "Q_StraightliningCount": [],
+  "Q_StraightliningPercentage": [],
+  "Q_StraightliningQuestions": [],
+  "RecipientEmail": [],
+  "RecipientFirstName": [],
+  "RecipientLastName": [],
+  "RecordedDate": [],
+  "ResponseId": [],
+  "StartDate": [],
+  "Status": [],
+  "UserLanguage": [],
+  "WRBLS Awareness": [],
+  "WRBLS BR Awareness": [],
+  "WRBLS Consideration": [],
+  "WRBLS Leadership": [],
+  "ad": [],
+  "awareness": [],
+  "category_interest": [],
+  "consideration": [],
+  "gc": [],
+  "platform": [],
+  "rdud": [],
+  "rid": []
+}

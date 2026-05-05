@@ -1,0 +1,63 @@
+# Changelog
+
+## Unreleased
+- Added saved-dataset rule matching in the Norm / benchmark audit so prior T2B/T3B/B2B/B3B choices are reused and conflicting changes require confirmation.
+- Changed Control and Test percentage formatting to whole rounded percentages with no decimals.
+- Changed lift formatting to whole percentage points with no decimals.
+- Changed Norm tables to default to the saved norms database when no workbook is active.
+- Removed saved-review content from beneath the saved-norm review checkbox; review mode now proceeds with the Next button.
+- Changed saved-norm review mode to skip upload-only pages and navigate between Norm tables and Saved datasets.
+- Added Back and Next page buttons to each app page.
+- Added upload-stage duplicate detection that flags Dataset already added to norms before audit work starts.
+- Changed duplicate-upload detection from workbook/sheet fingerprinting to respondent ID overlap, with exact cleaned-data matching as the no-ID fallback.
+- Added a Saved datasets page for editing previous dataset rules and regenerating saved norm tables.
+- Saved dataset workbooks now include cleaned respondent data and rule sheets needed for future recalculation.
+- Added explicit save-to-norms-database infrastructure with a dataset manifest, per-dataset workbooks, and an aggregate saved norms workbook.
+- Added duplicate-upload detection with replacement required for duplicates.
+- Changed on-screen norm tables to a BLS-style white table with black text.
+- Removed the repeated Metric column from norm tables.
+- Changed metadata filters such as Brand to use exact metadata fields, avoiding metric columns such as brand sentiment.
+- Changed buttons to VN pink with white text.
+- Added Norm tables filter buttons for Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age, plus a reset-to-total control/test button.
+- Simplified norm tables to response option, Control, Test, Lift, and Significance result, with one denominator-labeled Base size row per metric and no response-option count columns.
+- Changed norm tables to use audited norm/benchmark variable labels instead of QNR question text.
+- Removed project metadata fields from norm table output.
+- 2026-05-04 18:08: Denominator setting for `consideration` changed from `Total answering` to `Total sample`.
+- 2026-05-04 18:03: Denominator setting for `WRBLS Consideration` changed from `Default: Total answering` to `Total sample`.
+
+- Fixed scale-net selections being reset when saving the audit mapping.
+- Removed the Response labels tab; response-label detection now runs quietly during workbook intake.
+- Changed Denominator settings labels to use variable/norm labels instead of QNR question text.
+- Added missing project metadata prompts for brand, industry, client, quarter, year, methodology, project, country, and c_key.
+- Added project metadata prompts while excluding those fields from norm-question audit rows.
+- Removed the Box Score Base column from the Norm / benchmark audit.
+- Added bulk buttons to set or clear T2B, T3B, B2B, and B3B for all non-NA Scale / Likert audit rows.
+- Added saved NA alias matching so future uploads default previously excluded variables or question text to NA.
+- Added editable, persisted Question Type to the Norm / benchmark audit.
+- Added Smart Tables-style question type detection and saved type reuse for scale ordering.
+- Added saved-norm review mode so users can inspect saved norms without uploading a workbook.
+- Removed visible response-label sheet, respondent data layout, and response parsing controls from the audit page.
+- Added automatic response-label sheet detection for uploaded workbooks.
+- Changed selected box-score norms to replace full-scale response rows instead of appending to them.
+- Added default box-score detection from saved or suggested norm/benchmark names.
+- Added optional T2B, T3B, B2B, and B3B box-score rows for scale questions.
+- Added box-score audit persistence in `box_score_settings.json`.
+- Removed the raw respondent data preview from the audit page.
+- Changed standard survey platform/system columns to default to `NA` in the audit table instead of being removed.
+- Added Smart Tables-style scale response ordering for audit summaries and norm tables.
+- Replaced the setup-style mapped-question picker with a Smart Tables-style Survey Question Audit.
+- Added suggested norm/benchmark mapping, editable norm dropdown, and NA exclusion per question.
+- Added norm audit mapping persistence in `norm_mapping_settings.json`.
+- Applied the VN / Smart Tables visual theme to the norms app shell.
+- Made the BLS / Smart Tables layout the default intake layout.
+- Aligned response-option counting with the Smart Tables exact-match plus multi-select delimiter matching pattern.
+- Reused the Smart Tables intake pattern for optional variable-row/question-label-row Excel files.
+- Moved workbook setup controls from the sidebar into the Survey Question Audit page.
+- Clarified that uploaded Excel data is read as respondent-level rows with question columns.
+- Switched survey input from CSV to Excel workbooks.
+- Added optional response-label sheet mapping so coded response values can display readable labels.
+- Changed norm table export from CSV to an Excel workbook.
+- Added response-option norm calculation with Control %, Test %, lift in percentage points, and simple significance labels.
+- Added per-question denominator settings with Total answering as the default and Total sample as an alternate base.
+- Added denominator setting persistence in `denominator_settings.json`.
+- Added denominator change tracking in `CHANGELOG.md` and the denominator snapshot in `status.md`.
