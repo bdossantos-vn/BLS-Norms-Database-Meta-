@@ -100,7 +100,11 @@ If GitHub autocommit is not configured, runtime writes to `uploaded_datasets/` s
 
 The app checks each upload against saved respondent IDs when an ID field such as ResponseId is available. If 80% or more of unique respondent IDs overlap with a saved dataset in either direction, the upload page shows Dataset already added to norms and the save step requires Replace saved dataset instead of creating a duplicate. If no respondent ID field is available, the app falls back to exact cleaned-data matching rather than file name.
 
+If the respondent ID field has a project-specific name, use the Respondent ID variable dropdown during upload. The Saved datasets page has the same selector, so older saved datasets can be updated if the app originally marked the respondent ID as Not available.
+
 Use the Saved datasets page to edit previous dataset rules if standards change. The editor can update whether a source variable is included, its norm/benchmark mapping, denominator, question type, T2B/T3B/B2B/B3B selections, and the control/test setup. Saving updated rules regenerates that dataset workbook and the aggregate saved norms workbook.
+
+Saved Norm tables are recalculated from the stored respondent-level datasets as one appended read. When filters are selected, the app filters respondent rows inside each saved workbook first, then sums control/test denominators and selected-response counts before calculating percentages, lift, and significance.
 
 Datasets saved before this editable-rule infrastructure may need to be replaced from the original upload before their rules can be edited, because older saved workbooks did not include cleaned respondent data and rule sheets.
 

@@ -78,10 +78,12 @@ data_path = "uploaded_datasets"
 - Set `BLS_NORMS_DATA_DIR` to an absolute shared/persistent directory when hosting the app for multiple devices or on a server with mounted persistent storage.
 - Saves and saved-rule updates use a database write lock and atomic manifest writes so overlapping browser sessions do not overwrite each other.
 - Duplicate-upload safeguards use respondent ID overlap when an ID field such as `ResponseId` is available; 80% or higher overlap is flagged as a possible duplicate.
+- If the app cannot detect the respondent ID field, users can select the respondent ID variable during upload. Saved datasets can also be edited to set or change the respondent ID variable.
 - If no respondent ID field is available, duplicate safeguards fall back to exact cleaned-data matching rather than file name.
 - Duplicate datasets are flagged during workbook upload with a simple Dataset already added to norms notification.
 - The Saved datasets page can edit saved dataset rules and regenerate saved norm tables when standards change.
 - Newly saved dataset workbooks store cleaned respondent data and rule sheets so previous calculations can be rebuilt.
+- The Norm tables page rebuilds saved norms from the stored respondent-level workbooks as one appended read. Filters apply to respondent rows first, then control/test denominators, counts, percentages, lift, and significance are recalculated from the combined data.
 - Significance uses a two-proportion z-test with a 0.05 threshold.
 - Significance output is limited to Significant, Not significant, or Not tested.
 - Rows with missing group labels, missing sample sizes, invalid denominators, or unavailable percentage logic are shown as Not tested and/or Not available rather than forcing a result.

@@ -27,6 +27,7 @@ DENOMINATOR_OPTIONS = ["Total answering", "Total sample"]
 NOT_AVAILABLE = "Not available"
 NOT_TESTED = "Not tested"
 NA_NORM_OPTION = "NA"
+NO_RESPONDENT_ID_OPTION = "No respondent ID / not available"
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / "denominator_settings.json"
 NORM_MAPPING_PATH = APP_DIR / "norm_mapping_settings.json"
@@ -2435,9 +2436,18 @@ def calculate_norm_table(
         for score in (box_scores or [])
         if score in BOX_SCORE_OPTIONS
     ]
-    required_labels_missing = not group_column or not control_label or not test_label
+    required_labels_missing = (
+        not group_column
+        or group_column not in df.columns
+        or not control_label
+        or not test_label
+    )
 
-    group_values = df[group_column].map(normalize_answer) if group_column in df.columns else pd.Series([])
+    group_values = (
+        df[group_column].map(normalize_answer)
+        if group_column in df.columns
+        else pd.Series([], dtype=object)
+    )
     control_df = df[group_values == control_label] if not required_labels_missing else pd.DataFrame()
     test_df = df[group_values == test_label] if not required_labels_missing else pd.DataFrame()
 
@@ -2541,6 +2551,404 @@ def calculate_norm_table(
         )
 
     return pd.DataFrame(rows)
+
+
+def calculate_norm_count_summary(
+    df: pd.DataFrame,
+    question: str,
+    group_column: str,
+    control_label: str | None,
+    test_label: str | None,
+    denominator_setting: str,
+    split_multi_select: bool,
+    delimiter: str,
+    response_labels: dict[str, dict[str, str]] | None = None,
+    question_labels: dict[str, str] | None = None,
+    box_scores: list[str] | None = None,
+    question_type: str | None = None,
+) -> dict:
+    response_labels = response_labels or {}
+    question_labels = question_labels or {}
+    question_type = normalize_question_type(question_type)
+    box_scores = [
+        score
+        for score in (box_scores or [])
+        if score in BOX_SCORE_OPTIONS
+    ]
+    required_labels_missing = (
+        not group_column
+        or group_column not in df.columns
+        or not control_label
+        or not test_label
+    )
+
+    group_values = (
+        df[group_column].map(normalize_answer)
+        if group_column in df.columns
+        else pd.Series([], dtype=object)
+    )
+    control_df = df[group_values == control_label] if not required_labels_missing else pd.DataFrame()
+    test_df = df[group_values == test_label] if not required_labels_missing else pd.DataFrame()
+    control_n = denominator_for(control_df, question, denominator_setting) or 0
+    test_n = denominator_for(test_df, question, denominator_setting) or 0
+
+    options = response_options_for_question(
+        df,
+        question,
+        response_labels,
+        split_multi_select,
+        delimiter,
+        question_labels,
+        question_type,
+    )
+    control_counts = response_counts(
+        control_df,
+        question,
+        split_multi_select,
+        delimiter,
+        options,
+    )
+    test_counts = response_counts(
+        test_df,
+        question,
+        split_multi_select,
+        delimiter,
+        options,
+    )
+    if not options:
+        options = option_order(control_counts, test_counts)
+
+    rows = []
+    base_box_options = box_score_base_options(question, options, response_labels)
+    if not box_scores:
+        for option in options:
+            rows.append(
+                {
+                    "Response option": display_response_label(question, option, response_labels),
+                    "Control count": control_counts.get(option, 0),
+                    "Test count": test_counts.get(option, 0),
+                }
+            )
+    else:
+        for box_score in box_scores:
+            selected_options = selected_box_score_options(box_score, base_box_options)
+            rows.append(
+                {
+                    "Response option": box_score_response_label(
+                        question,
+                        box_score,
+                        selected_options,
+                        response_labels,
+                    ),
+                    "Control count": (
+                        box_score_count(control_df, question, selected_options, delimiter)
+                        if selected_options
+                        else 0
+                    ),
+                    "Test count": (
+                        box_score_count(test_df, question, selected_options, delimiter)
+                        if selected_options
+                        else 0
+                    ),
+                }
+            )
+
+    return {
+        "Control denominator": control_n,
+        "Test denominator": test_n,
+        "Denominator": denominator_setting,
+        "Rows": rows,
+    }
+
+
+def combined_norm_table_from_counts(
+    metric_counts: dict,
+) -> pd.DataFrame:
+    control_n = metric_counts.get("Control denominator", 0)
+    test_n = metric_counts.get("Test denominator", 0)
+    denominators = metric_counts.get("Denominators", set())
+    denominator_label = (
+        next(iter(denominators))
+        if len(denominators) == 1
+        else "Mixed denominator"
+    )
+
+    rows = [
+        {
+            "Response option": f"Base size ({denominator_label})",
+            "Control": control_n,
+            "Test": test_n,
+            "Lift": NOT_AVAILABLE,
+            "Significance result": NOT_TESTED,
+        }
+    ]
+
+    for response_option, counts in metric_counts.get("Rows", {}).items():
+        control_count = counts.get("Control count", 0)
+        test_count = counts.get("Test count", 0)
+        control_rate = safe_rate(control_count, control_n)
+        test_rate = safe_rate(test_count, test_n)
+        rows.append(
+            {
+                "Response option": response_option,
+                "Control": format_percent(control_rate),
+                "Test": format_percent(test_rate),
+                "Lift": format_lift(control_rate, test_rate),
+                "Significance result": two_proportion_z_test(
+                    control_count,
+                    control_n,
+                    test_count,
+                    test_n,
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def build_combined_saved_norm_tables(
+    saved_records: list[dict],
+    selected_filters: dict[str, list[str]] | None = None,
+) -> tuple[dict[str, pd.DataFrame], dict[str, list[str]]]:
+    selected_filters = selected_filters or {}
+    combined_counts: dict[str, dict] = {}
+    source_variables: dict[str, list[str]] = {}
+
+    for record in saved_records:
+        dataset_id = normalize_answer(record.get("dataset_id"))
+        if not dataset_id:
+            continue
+
+        dataset_path = norm_database_dataset_path(dataset_id)
+        rules = read_norm_dataset_rules(dataset_path)
+        if rules is None:
+            continue
+
+        try:
+            source_data = pd.read_excel(
+                dataset_path,
+                sheet_name=NORM_DATASET_RESPONDENT_SHEET,
+                dtype=object,
+            )
+        except Exception:
+            continue
+
+        group_column = rules.get("group_column")
+        control_label = rules.get("control_label")
+        test_label = rules.get("test_label")
+        response_labels = rules.get("response_labels", {})
+        question_labels = rules.get("question_labels", {})
+        source_data = apply_saved_norm_filters(
+            source_data,
+            question_labels,
+            selected_filters,
+        )
+        if source_data.empty:
+            continue
+
+        for rule in rules.get("norm_rules", []):
+            source_variable = normalize_answer(rule.get("Source variable"))
+            metric = normalize_answer(rule.get("Norm / benchmark")) or source_variable
+            if (
+                not source_variable
+                or source_variable not in source_data.columns
+                or not norm_rule_is_included(rule)
+                or metric == NA_NORM_OPTION
+            ):
+                continue
+
+            denominator = rule.get("Denominator", DEFAULT_DENOMINATOR)
+            if denominator not in DENOMINATOR_OPTIONS:
+                denominator = DEFAULT_DENOMINATOR
+            summary = calculate_norm_count_summary(
+                source_data,
+                source_variable,
+                group_column,
+                control_label,
+                test_label,
+                denominator,
+                rules.get("split_multi_select", False),
+                rules.get("delimiter", ";"),
+                response_labels,
+                question_labels,
+                normalize_box_score_list(rule.get("Box scores")),
+                rule.get("Question Type"),
+            )
+
+            metric_counts = combined_counts.setdefault(
+                metric,
+                {
+                    "Control denominator": 0,
+                    "Test denominator": 0,
+                    "Denominators": set(),
+                    "Rows": {},
+                },
+            )
+            metric_counts["Control denominator"] += summary["Control denominator"]
+            metric_counts["Test denominator"] += summary["Test denominator"]
+            metric_counts["Denominators"].add(summary["Denominator"])
+            source_variables.setdefault(metric, [])
+            if source_variable not in source_variables[metric]:
+                source_variables[metric].append(source_variable)
+
+            for row in summary["Rows"]:
+                response_option = row["Response option"]
+                row_counts = metric_counts["Rows"].setdefault(
+                    response_option,
+                    {
+                        "Control count": 0,
+                        "Test count": 0,
+                    },
+                )
+                row_counts["Control count"] += row["Control count"]
+                row_counts["Test count"] += row["Test count"]
+
+    tables = {
+        metric: combined_norm_table_from_counts(metric_counts)
+        for metric, metric_counts in combined_counts.items()
+    }
+    return tables, source_variables
+
+
+def saved_filter_column_for_label(
+    df: pd.DataFrame,
+    question_labels: dict[str, str],
+    label: str,
+) -> str | None:
+    for field_label, aliases in NORM_FILTER_FIELDS:
+        if field_label == label:
+            return filter_column_for_field(
+                df,
+                question_labels,
+                aliases,
+                exact_match=label in EXACT_NORM_FILTERS,
+            )
+    return None
+
+
+def apply_saved_norm_filters(
+    df: pd.DataFrame,
+    question_labels: dict[str, str],
+    selected_filters: dict[str, list[str]],
+) -> pd.DataFrame:
+    filtered_df = df
+    for label, selected_values in selected_filters.items():
+        if not selected_values:
+            continue
+
+        column = saved_filter_column_for_label(filtered_df, question_labels, label)
+        if column is None:
+            return filtered_df.iloc[0:0]
+
+        filtered_df = apply_norm_filters(filtered_df, {column: selected_values})
+        if filtered_df.empty:
+            return filtered_df
+
+    return filtered_df
+
+
+def saved_norm_filter_options(
+    saved_records: list[dict],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    options_by_label: dict[str, set[str]] = {
+        label: set()
+        for label, _aliases in NORM_FILTER_FIELDS
+    }
+    columns_by_label: dict[str, set[str]] = {
+        label: set()
+        for label, _aliases in NORM_FILTER_FIELDS
+    }
+
+    for record in saved_records:
+        dataset_id = normalize_answer(record.get("dataset_id"))
+        if not dataset_id:
+            continue
+
+        dataset_path = norm_database_dataset_path(dataset_id)
+        rules = read_norm_dataset_rules(dataset_path)
+        if rules is None:
+            continue
+
+        try:
+            source_data = pd.read_excel(
+                dataset_path,
+                sheet_name=NORM_DATASET_RESPONDENT_SHEET,
+                dtype=object,
+            )
+        except Exception:
+            continue
+
+        question_labels = rules.get("question_labels", {})
+        for label, _aliases in NORM_FILTER_FIELDS:
+            column = saved_filter_column_for_label(source_data, question_labels, label)
+            if column is None:
+                continue
+
+            columns_by_label[label].add(column)
+            options_by_label[label].update(filter_option_values(source_data[column]))
+
+    return (
+        {
+            label: filter_option_values(pd.Series(list(values), dtype=object))
+            for label, values in options_by_label.items()
+        },
+        {
+            label: sorted(values)
+            for label, values in columns_by_label.items()
+        },
+    )
+
+
+def saved_norm_filter_totals(
+    saved_records: list[dict],
+    selected_filters: dict[str, list[str]],
+) -> dict[str, int]:
+    totals = {
+        "datasets": 0,
+        "rows": 0,
+        "control_rows": 0,
+        "test_rows": 0,
+    }
+
+    for record in saved_records:
+        dataset_id = normalize_answer(record.get("dataset_id"))
+        if not dataset_id:
+            continue
+
+        dataset_path = norm_database_dataset_path(dataset_id)
+        rules = read_norm_dataset_rules(dataset_path)
+        if rules is None:
+            continue
+
+        try:
+            source_data = pd.read_excel(
+                dataset_path,
+                sheet_name=NORM_DATASET_RESPONDENT_SHEET,
+                dtype=object,
+            )
+        except Exception:
+            continue
+
+        filtered_data = apply_saved_norm_filters(
+            source_data,
+            rules.get("question_labels", {}),
+            selected_filters,
+        )
+        if filtered_data.empty:
+            continue
+
+        totals["datasets"] += 1
+        totals["rows"] += int(len(filtered_data))
+
+        group_column = rules.get("group_column")
+        control_label = rules.get("control_label")
+        test_label = rules.get("test_label")
+        if group_column in filtered_data.columns:
+            group_values = filtered_data[group_column].map(normalize_answer)
+            totals["control_rows"] += int((group_values == control_label).sum())
+            totals["test_rows"] += int((group_values == test_label).sum())
+
+    return totals
 
 
 def build_norm_tables(
@@ -2974,30 +3382,30 @@ def render_norm_filter_controls(
     return filtered_df
 
 
-def render_saved_norm_filter_controls(saved_tables: pd.DataFrame) -> pd.DataFrame:
+def render_saved_norm_filter_controls(saved_records: list[dict]) -> dict[str, list[str]]:
     st.subheader("Filters")
-    st.caption("Filter saved datasets before reviewing norm tables. Reset returns to all saved datasets.")
+    st.caption(
+        "Filter respondent rows across all saved datasets before reviewing norm tables. "
+        "Reset returns to total control vs test."
+    )
 
     reset_col, status_col = st.columns([1, 3])
     if reset_col.button("Reset to total control vs test", use_container_width=True):
         reset_norm_filters()
 
+    options_by_label, columns_by_label = saved_norm_filter_options(saved_records)
     selected_filters: dict[str, list[str]] = {}
     active_filter_descriptions: list[str] = []
     unavailable_filters: list[str] = []
     filter_columns = st.columns(3)
 
-    for index, (label, aliases) in enumerate(NORM_FILTER_FIELDS):
+    for index, (label, _aliases) in enumerate(NORM_FILTER_FIELDS):
         key = norm_filter_key(label)
-        column = filter_column_for_field(
-            saved_tables,
-            {},
-            aliases,
-            exact_match=label in EXACT_NORM_FILTERS,
-        )
         column_container = filter_columns[index % len(filter_columns)]
+        options = options_by_label.get(label, [])
+        source_columns = columns_by_label.get(label, [])
 
-        if column is None:
+        if not options:
             st.session_state[key] = []
             unavailable_filters.append(label)
             column_container.button(
@@ -3007,7 +3415,6 @@ def render_saved_norm_filter_controls(saved_tables: pd.DataFrame) -> pd.DataFram
             )
             continue
 
-        options = filter_option_values(saved_tables[column])
         st.session_state[key] = [
             value
             for value in st.session_state.get(key, [])
@@ -3021,25 +3428,28 @@ def render_saved_norm_filter_controls(saved_tables: pd.DataFrame) -> pd.DataFram
                 key=key,
                 placeholder="All",
             )
-            st.caption(f"Source variable: {column}")
+            source_caption = ", ".join(source_columns[:3])
+            if len(source_columns) > 3:
+                source_caption += f", +{len(source_columns) - 3} more"
+            st.caption(f"Source variable: {source_caption}")
 
         selected_values = st.session_state.get(key, [])
         if selected_values:
-            selected_filters[column] = selected_values
+            selected_filters[label] = selected_values
             active_filter_descriptions.append(
-                describe_norm_filter(label, column, selected_values, {})
+                f"{label}: {', '.join(selected_values[:3])}"
+                + (f", +{len(selected_values) - 3} more" if len(selected_values) > 3 else "")
             )
 
-    filtered_tables = apply_norm_filters(saved_tables, selected_filters)
     if active_filter_descriptions:
         status_col.caption("Active filters: " + " | ".join(active_filter_descriptions))
     else:
-        status_col.caption("No filters applied. Tables show all saved datasets.")
+        status_col.caption("No filters applied. Tables show total control vs test.")
 
     if unavailable_filters:
         st.caption("Unavailable filters: " + ", ".join(unavailable_filters))
 
-    return filtered_tables
+    return selected_filters
 
 
 def prompt_for_missing_project_metadata(
@@ -3442,6 +3852,22 @@ def github_autocommit_uploaded_datasets(commit_message: str) -> tuple[bool, str]
     return True, f"GitHub autocommit saved `{config['data_path']}` to `{config['repo']}`."
 
 
+def save_message_with_github_status(
+    base_message: str,
+    commit_ok: bool,
+    commit_message: str,
+) -> str:
+    quiet_messages = {
+        "GitHub autocommit is not configured.",
+        "GitHub autocommit found no file changes.",
+    }
+    if commit_message in quiet_messages:
+        return base_message
+    if commit_ok:
+        return f"{base_message} {commit_message}"
+    return f"{base_message} GitHub backup did not commit. Check Streamlit secrets."
+
+
 def migrate_legacy_norm_database_if_needed() -> None:
     if NORM_DATABASE_DIR == NORM_DATABASE_LEGACY_DIR:
         restore_norm_database_from_uploaded_datasets_if_needed()
@@ -3570,8 +3996,16 @@ def respondent_id_column_for_data(
 def respondent_id_hashes_for_data(
     df: pd.DataFrame,
     question_labels: dict[str, str] | None = None,
+    selected_column: str | None = None,
 ) -> tuple[str | None, list[str]]:
-    column = respondent_id_column_for_data(df, question_labels)
+    if selected_column == NO_RESPONDENT_ID_OPTION:
+        return None, []
+
+    if selected_column is not None:
+        column = selected_column if selected_column in df.columns else None
+    else:
+        column = respondent_id_column_for_data(df, question_labels)
+
     if column is None or column not in df.columns:
         return None, []
 
@@ -3581,6 +4015,74 @@ def respondent_id_hashes_for_data(
     ]
     unique_values = sorted({value for value in normalized_values if value})
     return column, [normalized_hash(value) for value in unique_values]
+
+
+def normalize_respondent_id_selection(value: object, columns: list[str]) -> str | None:
+    selected_value = normalize_answer(value)
+    if not selected_value or selected_value == NO_RESPONDENT_ID_OPTION:
+        return None
+    return selected_value if selected_value in columns else None
+
+
+def display_variable_with_label(variable: str, question_labels: dict[str, str]) -> str:
+    label = display_question_label(variable, question_labels)
+    return variable if label == variable else f"{variable} - {label}"
+
+
+def render_respondent_id_selector(
+    df: pd.DataFrame,
+    question_labels: dict[str, str],
+    key: str,
+    current_column: str | None = None,
+) -> str | None:
+    columns = list(df.columns)
+    detected_column = respondent_id_column_for_data(df, question_labels)
+    current_column = normalize_respondent_id_selection(current_column, columns)
+    default_column = current_column or detected_column
+    options = [NO_RESPONDENT_ID_OPTION, *columns]
+    default_index = options.index(default_column) if default_column in options else 0
+
+    selected_column = st.selectbox(
+        "Respondent ID variable",
+        options,
+        index=default_index,
+        key=key,
+        format_func=lambda value: (
+            NO_RESPONDENT_ID_OPTION
+            if value == NO_RESPONDENT_ID_OPTION
+            else display_variable_with_label(value, question_labels)
+        ),
+        help=(
+            "Used to detect duplicate uploads. Select the respondent ID field if "
+            "the app cannot detect it automatically."
+        ),
+    )
+    respondent_id_column = (
+        NO_RESPONDENT_ID_OPTION
+        if selected_column == NO_RESPONDENT_ID_OPTION
+        else normalize_respondent_id_selection(selected_column, columns)
+    )
+    _column, respondent_hashes = respondent_id_hashes_for_data(
+        df,
+        question_labels,
+        respondent_id_column,
+    )
+
+    if respondent_id_column and respondent_id_column != NO_RESPONDENT_ID_OPTION:
+        st.caption(
+            f"Duplicate check will use `{respondent_id_column}` "
+            f"with {len(respondent_hashes):,} unique respondent IDs."
+        )
+    elif detected_column:
+        st.caption(
+            f"Detected `{detected_column}`, but duplicate check is set to no respondent ID."
+        )
+    else:
+        st.caption(
+            "No respondent ID selected. Duplicate detection will only catch exact cleaned-data matches."
+        )
+
+    return respondent_id_column
 
 
 def dataframe_content_fingerprint(
@@ -3702,11 +4204,13 @@ def norm_database_record_for_upload(
     included_mappings: dict[str, str],
     denominator_settings: dict[str, str],
     question_labels: dict[str, str] | None = None,
+    respondent_id_column: str | None = None,
 ) -> dict:
     upload_fingerprint = norm_upload_fingerprint(workbook_bytes, data_sheet)
     respondent_id_column, respondent_id_hashes = respondent_id_hashes_for_data(
         data,
         question_labels,
+        respondent_id_column,
     )
     content_fingerprint = dataframe_content_fingerprint(data)
     full_content_fingerprint = dataframe_content_fingerprint(data, ignore_project_metadata=False)
@@ -3751,10 +4255,12 @@ def norm_database_duplicate_probe_for_data(
     data_sheet: str | None,
     data: pd.DataFrame,
     question_labels: dict[str, str] | None = None,
+    respondent_id_column: str | None = None,
 ) -> dict:
     respondent_id_column, respondent_id_hashes = respondent_id_hashes_for_data(
         data,
         question_labels,
+        respondent_id_column,
     )
     content_fingerprint = dataframe_content_fingerprint(data)
     full_content_fingerprint = dataframe_content_fingerprint(data, ignore_project_metadata=False)
@@ -4159,9 +4665,11 @@ def save_norm_dataset_to_database(
     commit_ok, commit_message = github_autocommit_uploaded_datasets(
         f"Save BLS norms dataset {dataset_id}"
     )
-    if commit_ok:
-        return True, f"Dataset has been added. {commit_message}"
-    return True, f"Dataset has been added. {commit_message}"
+    return True, save_message_with_github_status(
+        "Dataset has been added.",
+        commit_ok,
+        commit_message,
+    )
 
 
 def render_norm_database_save_controls(
@@ -4372,6 +4880,7 @@ def update_saved_norm_dataset_rules(
     source_data: pd.DataFrame,
     updated_rules: dict,
     tables: dict[str, pd.DataFrame],
+    respondent_id_column: str | None = None,
 ) -> tuple[bool, str]:
     updated_record_for_commit = None
     try:
@@ -4399,6 +4908,13 @@ def update_saved_norm_dataset_rules(
                 for rule in updated_rules.get("norm_rules", [])
                 if rule.get("Include") and rule.get("Norm / benchmark") != NA_NORM_OPTION
             }
+            updated_respondent_id_column, updated_respondent_id_hashes = (
+                respondent_id_hashes_for_data(
+                    source_data,
+                    updated_rules.get("question_labels", {}),
+                    respondent_id_column,
+                )
+            )
             updated_record = {
                 **record,
                 "row_count": int(len(source_data)),
@@ -4410,6 +4926,10 @@ def update_saved_norm_dataset_rules(
                 "metadata_values": project_metadata_values(source_data),
                 "norm_mappings": included_mappings,
                 "denominator_settings": denominator_settings,
+                "respondent_id_column": updated_respondent_id_column or NOT_AVAILABLE,
+                "respondent_id_count": len(updated_respondent_id_hashes),
+                "respondent_id_hashes": updated_respondent_id_hashes,
+                "duplicate_overlap_threshold": DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
                 "rules_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
 
@@ -4435,7 +4955,11 @@ def update_saved_norm_dataset_rules(
     _commit_ok, commit_message = github_autocommit_uploaded_datasets(
         f"Update BLS norms dataset rules {dataset_id}"
     )
-    return True, f"Saved dataset rules updated and norm tables regenerated. {commit_message}"
+    return True, save_message_with_github_status(
+        "Saved dataset rules updated and norm tables regenerated.",
+        _commit_ok,
+        commit_message,
+    )
 
 
 def render_saved_datasets_tab() -> None:
@@ -4450,8 +4974,13 @@ def render_saved_datasets_tab() -> None:
         st.info("No saved norm datasets are available yet.")
         return
 
+    saved_record_display = (
+        pd.DataFrame(flatten_norm_database_record(record) for record in records)
+        .fillna(NOT_AVAILABLE)
+        .astype(str)
+    )
     st.dataframe(
-        pd.DataFrame(flatten_norm_database_record(record) for record in records),
+        saved_record_display,
         use_container_width=True,
         hide_index=True,
     )
@@ -4522,6 +5051,18 @@ def render_saved_datasets_tab() -> None:
         group_labels,
         index=test_index,
         key=f"saved_test_{selected_record.get('dataset_id')}",
+    )
+
+    saved_respondent_id_column = normalize_answer(
+        selected_record.get("respondent_id_column")
+    )
+    if saved_respondent_id_column == NOT_AVAILABLE:
+        saved_respondent_id_column = None
+    respondent_id_column = render_respondent_id_selector(
+        source_data,
+        rules.get("question_labels", {}),
+        key=f"saved_respondent_id_{selected_record.get('dataset_id')}",
+        current_column=saved_respondent_id_column,
     )
 
     data_columns = [
@@ -4608,6 +5149,7 @@ def render_saved_datasets_tab() -> None:
             source_data,
             updated_rules,
             tables,
+            respondent_id_column,
         )
         if success:
             st.success(message)
@@ -4647,71 +5189,53 @@ def saved_norm_database_download(
 def render_saved_norm_tables_review() -> None:
     st.subheader("Saved norm tables")
     st.caption(
-        "These tables come from the saved norms database. Upload a workbook only when "
-        "you want to audit and add or replace a dataset."
+        "These tables recalculate against the saved norms database as one combined "
+        "read. Upload a workbook only when you want to audit and add or replace a dataset."
     )
-    saved_tables = load_saved_norm_tables()
     saved_records = load_norm_database_manifest()
 
-    if not saved_tables.empty:
-        saved_tables = render_saved_norm_filter_controls(saved_tables)
+    if not saved_records:
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("Saved datasets", "0")
+        metric_cols[1].metric("Respondent rows", "0")
+        metric_cols[2].metric("Saved metrics", "0")
+        st.info("No saved norm tables are available yet.")
+        return
 
-    metric_cols = st.columns(3)
-    saved_dataset_count = (
-        saved_tables["Dataset ID"].nunique()
-        if "Dataset ID" in saved_tables.columns
-        else len(saved_records)
+    selected_filters = render_saved_norm_filter_controls(saved_records)
+    filter_totals = saved_norm_filter_totals(saved_records, selected_filters)
+    combined_tables, source_variables_by_metric = build_combined_saved_norm_tables(
+        saved_records,
+        selected_filters,
     )
+
+    metric_cols = st.columns(5)
     metric_cols[0].metric(
         "Saved datasets",
-        f"{saved_dataset_count:,}",
+        f"{filter_totals['datasets']:,}",
     )
-    metric_cols[1].metric("Saved rows", f"{len(saved_tables):,}")
-    metric_cols[2].metric(
-        "Saved metrics",
-        f"{saved_tables['Metric'].nunique():,}" if "Metric" in saved_tables.columns else "0",
-    )
+    metric_cols[1].metric("Filtered rows", f"{filter_totals['rows']:,}")
+    metric_cols[2].metric("Control rows", f"{filter_totals['control_rows']:,}")
+    metric_cols[3].metric("Test rows", f"{filter_totals['test_rows']:,}")
+    metric_cols[4].metric("Saved metrics", f"{len(combined_tables):,}")
 
-    if saved_tables.empty:
+    if not combined_tables:
         st.info("No saved norm tables are available for the current filters.")
         return
 
-    table_columns = [
-        column
-        for column in [
-            "Response option",
-            "Control",
-            "Test",
-            "Lift",
-            "Significance result",
-        ]
-        if column in saved_tables.columns
-    ]
-    if "Metric" not in saved_tables.columns or not table_columns:
-        render_norm_table(saved_tables)
-    else:
-        for metric, metric_table in saved_tables.groupby("Metric", sort=False):
-            st.subheader(str(metric))
-            source_variables = (
-                metric_table["Source variable"]
-                .map(normalize_answer)
-                .dropna()
-                .drop_duplicates()
-                .tolist()
-                if "Source variable" in metric_table.columns
-                else []
-            )
-            if source_variables:
-                st.caption(f"Source variable: {', '.join(source_variables)}")
-            render_norm_table(metric_table[table_columns].reset_index(drop=True))
+    for metric, metric_table in combined_tables.items():
+        st.subheader(str(metric))
+        source_variables = source_variables_by_metric.get(metric, [])
+        if source_variables:
+            st.caption(f"Source variable: {', '.join(source_variables)}")
+        render_norm_table(metric_table.reset_index(drop=True))
 
-    if NORM_DATABASE_WORKBOOK_PATH.exists():
-        st.download_button(
-            "Download saved norms Excel",
-            data=saved_norm_database_download(saved_tables, saved_records),
-            file_name="saved_norm_tables.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+    st.download_button(
+        "Download saved norms Excel",
+        data=norm_tables_to_excel(combined_tables),
+        file_name="combined_saved_norm_tables.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 def render_norm_table(table: pd.DataFrame) -> None:
@@ -4766,6 +5290,7 @@ def main() -> None:
     question_type_settings: dict[str, str] = {}
     audit_consistency_issues: list[dict] = []
     audit_consistency_confirmed = True
+    respondent_id_column = None
     group_column = None
     control_label = None
     test_label = None
@@ -4840,12 +5365,19 @@ def main() -> None:
                     data_sheet,
                 )
                 question_labels.update(label_question_labels)
+                st.subheader("Respondent ID setup")
+                respondent_id_column = render_respondent_id_selector(
+                    data,
+                    question_labels,
+                    key=f"upload_respondent_id_{uploaded_file_name}_{data_sheet}",
+                )
                 upload_duplicate_probe = norm_database_duplicate_probe_for_data(
                     workbook_bytes,
                     uploaded_file_name,
                     data_sheet,
                     data,
                     question_labels,
+                    respondent_id_column,
                 )
                 upload_duplicate_match = find_norm_database_duplicate_record(
                     load_norm_database_manifest(),
@@ -5220,6 +5752,7 @@ def main() -> None:
                     included_mappings,
                     effective_denominator_settings,
                     question_labels,
+                    respondent_id_column,
                 )
                 database_rules = norm_database_rules_for_upload(
                     candidate_questions or norm_questions,

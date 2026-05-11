@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Changed saved Norm tables to recalculate one combined read across all filtered saved respondent-level datasets, summing counts and denominators before percentages, lift, and significance.
+- Removed the unconfigured GitHub autocommit note from normal dataset-save success messages.
+- Added respondent ID variable selectors during upload and saved-dataset editing for datasets where the app cannot auto-detect the ID field.
 - Added optional GitHub autocommit for `uploaded_datasets/` after dataset saves and saved-rule updates.
 - Added a repo-facing `uploaded_datasets/` backup folder with raw uploads, saved norm workbooks, and norm-setting backups.
 - Added startup restore from `uploaded_datasets/` when the working norms database is missing.

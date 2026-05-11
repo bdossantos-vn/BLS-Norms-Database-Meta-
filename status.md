@@ -33,7 +33,8 @@
 - Lift is rounded to whole percentage points with no decimals.
 - On-screen norm tables render as BLS-style white tables with black text.
 - Norm tables include one denominator-labeled Base size row per metric and do not include response-option selected-count columns.
-- Norm tables can be filtered by saved-database fields such as Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age when available, with a reset button to return to all saved datasets. Metadata filters use exact metadata fields, so Brand does not use brand sentiment.
+- Norm tables can be filtered by saved respondent-level fields such as Project, Brand, Client, Industry, Country, Year, Quarter, Gender, and Age when available, with a reset button to return to total control vs test. Metadata filters use exact metadata fields, so Brand does not use brand sentiment.
+- Saved Norm tables recalculate from all filtered saved respondent-level datasets as one appended read, summing counts and denominators before percentages, lift, and significance.
 - Norm tables page includes an explicit save-to-norms-database step that writes local dataset workbooks, a manifest, and an aggregate saved norms workbook.
 - Saved norms storage is anchored to the app directory by default and can be moved to shared persistent storage with `BLS_NORMS_DATA_DIR`.
 - Saved datasets are also backed up in `uploaded_datasets/` with separate folders for raw uploads, app-ready norm workbooks, and norm-setting backups.
@@ -41,6 +42,7 @@
 - GitHub autocommit can push `uploaded_datasets/` after dataset saves and saved-rule updates when `[github_autocommit]` Streamlit secrets are configured.
 - Dataset saves and saved-rule edits use a write lock and atomic manifest writes for cross-session protection.
 - Duplicate uploads are detected by respondent ID overlap when an ID field is available; 80% or higher overlap is flagged and requires replacement rather than duplicate saving.
+- Upload and Saved datasets pages allow the respondent ID variable to be selected manually when auto-detection misses it.
 - Duplicate datasets are flagged during upload with a Dataset already added to norms notification.
 - Saved datasets page can edit previous dataset rules and regenerate saved norm tables when standards change.
 - Newly saved dataset workbooks include cleaned respondent data and rule sheets for recalculation.
