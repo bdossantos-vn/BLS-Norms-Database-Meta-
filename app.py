@@ -175,6 +175,10 @@ NORM_FILTER_FIELDS = [
 ]
 EXACT_NORM_FILTERS = {"Project", "Brand", "Client", "Industry", "Country", "Year", "Quarter"}
 NORM_FILTER_SESSION_PREFIX = "norm_filter_"
+UPLOAD_WORKBOOK_SESSION_KEY = "survey_excel_workbook_upload"
+ACTIVE_WORKBOOK_NAME_SESSION_KEY = "active_workbook_name"
+ACTIVE_WORKBOOK_BYTES_SESSION_KEY = "active_workbook_bytes"
+LOCAL_WORKBOOK_PATH_SESSION_KEY = "local_workbook_path"
 LIKERT_PATTERNS = [
     "strongly disagree",
     "disagree",
@@ -662,7 +666,7 @@ def render_page_navigation(page_index: int, review_mode: bool = False) -> None:
     next_disabled = "disabled" if next_index >= len(PAGE_NAMES) else ""
     previous_button = (
         f"""
-            <button class="vn-page-nav-back" type="button" {previous_disabled} onclick="goToTab({previous_index})">
+            <button class="vn-page-nav-back" type="button" {previous_disabled} data-target-label="{previous_label}" onclick="goToTab({previous_index}, this.dataset.targetLabel)">
                 Back{': ' + previous_label if previous_label else ''}
             </button>
         """
@@ -671,7 +675,7 @@ def render_page_navigation(page_index: int, review_mode: bool = False) -> None:
     )
     next_button = (
         f"""
-            <button class="vn-page-nav-next" type="button" {next_disabled} onclick="goToTab({next_index})">
+            <button class="vn-page-nav-next" type="button" {next_disabled} data-target-label="{next_label}" onclick="goToTab({next_index}, this.dataset.targetLabel)">
                 Next{': ' + next_label if next_label else ''}
             </button>
         """
@@ -737,11 +741,33 @@ def render_page_navigation(page_index: int, review_mode: bool = False) -> None:
             {next_button}
         </div>
         <script>
-            function goToTab(index) {{
-                const tabs = window.parent.document.querySelectorAll('[data-baseweb="tab"]');
-                if (tabs[index]) {{
-                    tabs[index].click();
-                    tabs[index].scrollIntoView({{ block: 'center', inline: 'nearest' }});
+            function tabText(element) {{
+                return (element.textContent || '').replace(/\\s+/g, ' ').trim();
+            }}
+
+            function candidateTabs(documentRoot) {{
+                const directTabs = Array.from(
+                    documentRoot.querySelectorAll('[role="tab"], [data-baseweb="tab"]')
+                );
+                if (directTabs.length) {{
+                    return directTabs;
+                }}
+
+                const tabLists = Array.from(documentRoot.querySelectorAll('[role="tablist"]'));
+                return tabLists.flatMap((tabList) =>
+                    Array.from(tabList.querySelectorAll('button, [tabindex], div'))
+                ).filter((element) => tabText(element));
+            }}
+
+            function goToTab(index, label) {{
+                const documentRoot = window.parent.document;
+                const tabs = candidateTabs(documentRoot);
+                const target = tabs.find((tab) => tabText(tab) === label)
+                    || tabs.find((tab) => tabText(tab).includes(label))
+                    || tabs[index];
+                if (target) {{
+                    target.click();
+                    target.scrollIntoView({{ block: 'center', inline: 'nearest' }});
                 }}
             }}
         </script>
@@ -3081,6 +3107,41 @@ def read_excel_workbook(uploaded_file) -> tuple[bytes, pd.ExcelFile] | tuple[Non
         return None, None
 
 
+def cache_uploaded_workbook_in_session() -> None:
+    uploaded_file = st.session_state.get(UPLOAD_WORKBOOK_SESSION_KEY)
+    if uploaded_file is None:
+        return
+
+    try:
+        workbook_bytes = uploaded_file.getvalue()
+    except Exception:
+        return
+
+    if not workbook_bytes:
+        return
+
+    st.session_state[ACTIVE_WORKBOOK_NAME_SESSION_KEY] = uploaded_file.name
+    st.session_state[ACTIVE_WORKBOOK_BYTES_SESSION_KEY] = workbook_bytes
+
+
+def clear_uploaded_workbook_session() -> None:
+    for key in [
+        ACTIVE_WORKBOOK_NAME_SESSION_KEY,
+        ACTIVE_WORKBOOK_BYTES_SESSION_KEY,
+    ]:
+        st.session_state.pop(key, None)
+
+
+def active_uploaded_workbook_from_session() -> tuple[str, bytes] | None:
+    workbook_name = normalize_answer(
+        st.session_state.get(ACTIVE_WORKBOOK_NAME_SESSION_KEY)
+    )
+    workbook_bytes = st.session_state.get(ACTIVE_WORKBOOK_BYTES_SESSION_KEY)
+    if not workbook_name or not workbook_bytes:
+        return None
+    return workbook_name, workbook_bytes
+
+
 def read_excel_sheet(workbook_bytes: bytes, sheet_name: str) -> pd.DataFrame | None:
     try:
         return pd.read_excel(BytesIO(workbook_bytes), sheet_name=sheet_name, dtype=object)
@@ -3594,18 +3655,59 @@ def uploaded_dataset_workbook_path(dataset_id: str) -> Path:
     return UPLOADED_NORM_WORKBOOKS_DIR / f"{safe_dataset_filename(dataset_id, 'dataset')}.xlsx"
 
 
+def read_manifest_records(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def merge_manifest_records(local_records: list[dict], backup_records: list[dict]) -> list[dict]:
+    merged_records: dict[str, dict] = {}
+    unnamed_records: list[dict] = []
+
+    for record in [*backup_records, *local_records]:
+        dataset_id = normalize_answer(record.get("dataset_id"))
+        if not dataset_id:
+            unnamed_records.append(record)
+            continue
+        merged_records[dataset_id] = record
+
+    return [*merged_records.values(), *unnamed_records]
+
+
 def restore_norm_database_from_uploaded_datasets_if_needed() -> None:
-    if NORM_DATABASE_MANIFEST_PATH.exists() or not UPLOADED_MANIFEST_BACKUP_PATH.exists():
+    if not UPLOADED_MANIFEST_BACKUP_PATH.exists():
         return
 
     try:
         NORM_DATABASE_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(UPLOADED_MANIFEST_BACKUP_PATH, NORM_DATABASE_MANIFEST_PATH)
-        if UPLOADED_NORM_TABLES_BACKUP_PATH.exists():
+        local_records = read_manifest_records(NORM_DATABASE_MANIFEST_PATH)
+        backup_records = read_manifest_records(UPLOADED_MANIFEST_BACKUP_PATH)
+        merged_records = merge_manifest_records(local_records, backup_records)
+
+        if merged_records != local_records:
+            temp_path = NORM_DATABASE_MANIFEST_PATH.with_suffix(".json.tmp")
+            temp_path.write_text(
+                json.dumps(merged_records, indent=2, sort_keys=True) + "\n"
+            )
+            temp_path.replace(NORM_DATABASE_MANIFEST_PATH)
+        elif not NORM_DATABASE_MANIFEST_PATH.exists():
+            shutil.copy2(UPLOADED_MANIFEST_BACKUP_PATH, NORM_DATABASE_MANIFEST_PATH)
+
+        if (
+            UPLOADED_NORM_TABLES_BACKUP_PATH.exists()
+            and not NORM_DATABASE_WORKBOOK_PATH.exists()
+        ):
             shutil.copy2(UPLOADED_NORM_TABLES_BACKUP_PATH, NORM_DATABASE_WORKBOOK_PATH)
         if UPLOADED_NORM_WORKBOOKS_DIR.exists():
             for workbook_path in UPLOADED_NORM_WORKBOOKS_DIR.glob("*.xlsx"):
-                shutil.copy2(workbook_path, NORM_DATABASE_DATASETS_DIR / workbook_path.name)
+                destination_path = NORM_DATABASE_DATASETS_DIR / workbook_path.name
+                if not destination_path.exists():
+                    shutil.copy2(workbook_path, destination_path)
     except OSError:
         return
 
@@ -3937,15 +4039,7 @@ def norm_database_write_lock(timeout_seconds: int = 30):
 
 def load_norm_database_manifest() -> list[dict]:
     migrate_legacy_norm_database_if_needed()
-    if not NORM_DATABASE_MANIFEST_PATH.exists():
-        return []
-
-    try:
-        data = json.loads(NORM_DATABASE_MANIFEST_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
-
-    records = data if isinstance(data, list) else []
+    records = read_manifest_records(NORM_DATABASE_MANIFEST_PATH)
     if records and not UPLOADED_MANIFEST_BACKUP_PATH.exists():
         backup_norm_database_to_uploaded_datasets(records)
     return records
@@ -5321,13 +5415,32 @@ def main() -> None:
             uploaded_file = st.file_uploader(
                 "Survey Excel workbook",
                 type=["xlsx", "xlsm", "xls"],
+                key=UPLOAD_WORKBOOK_SESSION_KEY,
+                on_change=cache_uploaded_workbook_in_session,
             )
 
-            if uploaded_file is None:
-                st.info("Upload a workbook to begin setup, or use the saved-norm review option above.")
-            else:
+            if uploaded_file is not None:
                 uploaded_file_name = uploaded_file.name
                 workbook_bytes, excel_file = read_excel_workbook(uploaded_file)
+                if workbook_bytes is not None:
+                    st.session_state[ACTIVE_WORKBOOK_NAME_SESSION_KEY] = uploaded_file_name
+                    st.session_state[ACTIVE_WORKBOOK_BYTES_SESSION_KEY] = workbook_bytes
+            else:
+                active_workbook = active_uploaded_workbook_from_session()
+                if active_workbook is not None:
+                    uploaded_file_name, workbook_bytes = active_workbook
+                    try:
+                        excel_file = pd.ExcelFile(BytesIO(workbook_bytes))
+                    except Exception as exc:
+                        st.error(f"Could not read Excel workbook: {exc}")
+                        clear_uploaded_workbook_session()
+                        workbook_bytes = None
+                        excel_file = None
+
+            if workbook_bytes is None or excel_file is None:
+                st.info("Upload a workbook to begin setup, or use the saved-norm review option above.")
+            else:
+                st.caption(f"Workbook loaded: `{uploaded_file_name}`")
 
         if not review_saved_norms and workbook_bytes is not None and excel_file is not None:
             data_sheet = st.selectbox("Respondent data sheet", excel_file.sheet_names)

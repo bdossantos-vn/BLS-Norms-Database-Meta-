@@ -61,7 +61,7 @@ streamlit run app.py
 - Saved norm datasets are stored in persistent app-level storage, with one workbook per saved dataset and an aggregate `saved_norm_tables.xlsx` workbook.
 - By default, saved norms live under the app folder at `norm_database/`, so restarting Streamlit from a different working directory does not make the database look empty.
 - Each saved dataset is also backed up under `uploaded_datasets/`: raw uploads go to `raw_uploads/`, app-ready saved norm workbooks go to `norm_workbooks/`, and manifest/rule backups go to `norm_settings/`.
-- On startup, if the working `norm_database/` is missing, the app restores it from `uploaded_datasets/`.
+- On startup or refresh, if the working `norm_database/` is missing or partial, the app restores missing manifest and dataset files from `uploaded_datasets/`.
 - On Streamlit Cloud, GitHub autocommit can save `uploaded_datasets/` back to the repository after each dataset save or saved-rule update.
 - Configure GitHub autocommit in Streamlit secrets with a token that has repository Contents read/write access:
 

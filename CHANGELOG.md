@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Stabilized workbook uploads with an explicit Streamlit uploader key and session cache.
+- Improved saved norms restore from `uploaded_datasets/` when the working manifest or dataset workbooks are missing or partial after an app refresh/restart.
 - Changed saved Norm tables to recalculate one combined read across all filtered saved respondent-level datasets, summing counts and denominators before percentages, lift, and significance.
 - Removed the unconfigured GitHub autocommit note from normal dataset-save success messages.
 - Added respondent ID variable selectors during upload and saved-dataset editing for datasets where the app cannot auto-detect the ID field.
