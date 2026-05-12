@@ -2715,6 +2715,10 @@ def norm_chart_rows(table: pd.DataFrame) -> list[dict]:
                 "control_points": control_points,
                 "test_points": test_points,
                 "lift_points": lift_points,
+                "significant": (
+                    normalize_answer(row.get("Significance result")).lower()
+                    == "significant"
+                ),
             }
         )
 
@@ -6117,7 +6121,9 @@ def chart_bar_height(points: float) -> float:
     return max(0, min(100, points))
 
 
-def lift_direction_class(points: float) -> str:
+def lift_direction_class(points: float, significant: bool) -> str:
+    if not significant:
+        return "neutral"
     if points > 0:
         return "positive"
     if points < 0:
@@ -6136,7 +6142,7 @@ def render_norm_bar_chart(table: pd.DataFrame) -> None:
         control_height = chart_bar_height(row["control_points"])
         test_height = chart_bar_height(row["test_points"])
         lift_label = format_lift_points(row["lift_points"]).replace("pts", "")
-        lift_class = lift_direction_class(row["lift_points"])
+        lift_class = lift_direction_class(row["lift_points"], row["significant"])
         groups.append(
             '<div class="vn-chart-group">'
             '<div class="vn-chart-plot">'
