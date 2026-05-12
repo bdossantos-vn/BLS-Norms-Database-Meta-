@@ -4118,7 +4118,8 @@ def write_excel_cell_chart(
         return start_row
 
     plot_rows = 12
-    plot_top_row = start_row + 4
+    lift_row = start_row + 2
+    plot_top_row = start_row + 5
     plot_bottom_row = plot_top_row + plot_rows - 1
     label_row = plot_bottom_row + 2
     max_points = max(
@@ -4128,12 +4129,10 @@ def write_excel_cell_chart(
     axis_max = max(10, math.ceil(max_points / 10) * 10)
     border = excel_thin_border()
 
-    title_cell = worksheet.cell(row=start_row, column=start_col, value="Control vs test")
-    title_cell.font = Font(bold=True, size=12, color=VN_BLACK)
-    title_cell.alignment = Alignment(vertical="center")
     worksheet.row_dimensions[start_row].height = 22
+    worksheet.row_dimensions[lift_row].height = 24
 
-    legend_col = start_col + 3
+    legend_col = start_col
     legend_items = [
         ("Control", VN_CONTROL_GRAY),
         ("Test", VN_PINK),
@@ -4156,11 +4155,13 @@ def write_excel_cell_chart(
     worksheet.row_dimensions[label_row].height = 38
 
     for index, chart_row in enumerate(chart_rows):
-        control_col = start_col + index * 3
-        test_col = control_col + 1
-        spacer_col = control_col + 2
-        worksheet.column_dimensions[get_column_letter(control_col)].width = 7.2
-        worksheet.column_dimensions[get_column_letter(test_col)].width = 7.2
+        control_col = start_col + index * 4
+        lift_col = control_col + 1
+        test_col = control_col + 2
+        spacer_col = control_col + 3
+        worksheet.column_dimensions[get_column_letter(control_col)].width = 6.8
+        worksheet.column_dimensions[get_column_letter(lift_col)].width = 5.2
+        worksheet.column_dimensions[get_column_letter(test_col)].width = 6.8
         worksheet.column_dimensions[get_column_letter(spacer_col)].width = 2
 
         control_segments = round((chart_row["control_points"] / axis_max) * plot_rows)
@@ -4200,20 +4201,9 @@ def write_excel_cell_chart(
             VN_PINK,
         )
 
-        bubble_row = max(
-            plot_top_row + 1,
-            plot_bottom_row - max(control_segments, test_segments, 1) + 2,
-        )
-        bubble_row = min(bubble_row, label_row - 3)
-        worksheet.merge_cells(
-            start_row=bubble_row,
-            start_column=control_col,
-            end_row=bubble_row + 1,
-            end_column=test_col,
-        )
         bubble_cell = worksheet.cell(
-            row=bubble_row,
-            column=control_col,
+            row=lift_row,
+            column=lift_col,
             value=format_lift_points(chart_row["lift_points"]).replace("pts", ""),
         )
         bubble_cell.fill = PatternFill("solid", fgColor=VN_WHITE)
@@ -4249,7 +4239,7 @@ def add_norm_chart_to_excel_sheet(
     if not chart_rows:
         return
 
-    chart_col = len(table.columns) + 2
+    chart_col = max(len(table.columns) + 2, len(chart_rows) * 4 + 3)
     chart_data_row = 6
     write_chart_source_table(worksheet, chart_rows, chart_data_row, chart_col)
     write_excel_cell_chart(worksheet, chart_rows, table_end_row + 3)
