@@ -13,10 +13,15 @@ from contextlib import contextmanager
 from difflib import SequenceMatcher
 from dataclasses import dataclass
 from datetime import datetime
+from html import escape
 from io import BytesIO
 from pathlib import Path
 import re
 
+from openpyxl.chart import BarChart, Reference
+from openpyxl.chart.label import DataLabelList
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -70,6 +75,12 @@ NORM_DATASET_RESPONSE_LABELS_SHEET = "Response Labels"
 DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD = 0.8
 SIGNIFICANCE_ALPHA = 0.05
 NO_LABEL_SHEET = "No labels sheet"
+VN_PINK = "FF005C"
+VN_CONTROL_GRAY = "C9D0D8"
+VN_BLACK = "000000"
+VN_WHITE = "FFFFFF"
+VN_GRAY_50 = "F8F8FA"
+VN_GRAY_200 = "E2E5EA"
 SMART_TABLES_LAYOUT = "BLS / Smart Tables layout"
 RESPONDENT_ROWS_LAYOUT = "Standard respondent table"
 DATA_LAYOUT_OPTIONS = [SMART_TABLES_LAYOUT, RESPONDENT_ROWS_LAYOUT]
@@ -598,6 +609,120 @@ def apply_bls_theme() -> None:
 
             .vn-norm-table tbody tr:nth-child(even) td {
                 background: var(--vn-gray-50) !important;
+            }
+
+            .vn-chart-card {
+                width: 100%;
+                min-width: 0;
+                margin: 0.45rem 0 1.45rem 0;
+                padding: 0.9rem 0.95rem 0.8rem 0.95rem;
+                border: 1px solid var(--vn-gray-200);
+                border-radius: 8px;
+                background: var(--vn-white);
+                overflow: hidden;
+            }
+
+            .vn-chart-title {
+                color: var(--vn-black) !important;
+                font-size: 0.86rem;
+                font-weight: 800;
+                margin: 0 0 0.65rem 0;
+            }
+
+            .vn-chart-scroll {
+                display: flex;
+                align-items: flex-end;
+                gap: 1.15rem;
+                overflow-x: auto;
+                padding: 0.25rem 0.1rem 0.2rem 0.1rem;
+            }
+
+            .vn-chart-group {
+                position: relative;
+                flex: 0 0 132px;
+                min-width: 132px;
+            }
+
+            .vn-chart-plot {
+                position: relative;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                align-items: end;
+                gap: 0.35rem;
+                height: 170px;
+                padding: 0 0.25rem;
+                border-bottom: 1px solid var(--vn-gray-200);
+            }
+
+            .vn-chart-bar-column {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: flex-end;
+                height: 100%;
+                min-width: 0;
+            }
+
+            .vn-chart-value {
+                color: var(--vn-black) !important;
+                font-size: 0.92rem;
+                font-weight: 800;
+                line-height: 1;
+                margin-bottom: 0.35rem;
+                white-space: nowrap;
+            }
+
+            .vn-chart-value.control {
+                color: #aeb7c1 !important;
+            }
+
+            .vn-chart-value.test {
+                color: var(--vn-red) !important;
+            }
+
+            .vn-chart-bar {
+                width: 100%;
+                min-height: 4px;
+                border-radius: 4px 4px 0 0;
+            }
+
+            .vn-chart-bar.control {
+                background: #c9d0d8;
+            }
+
+            .vn-chart-bar.test {
+                background: var(--vn-red);
+            }
+
+            .vn-lift-bubble {
+                position: absolute;
+                left: 50%;
+                bottom: 2.1rem;
+                z-index: 3;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 44px;
+                height: 44px;
+                transform: translateX(-50%);
+                border: 1px solid var(--vn-gray-200);
+                border-radius: 999px;
+                background: var(--vn-white);
+                color: #4c5361 !important;
+                font-size: 0.95rem;
+                font-weight: 800;
+                box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
+            }
+
+            .vn-chart-label {
+                color: var(--vn-black) !important;
+                font-size: 0.76rem;
+                font-weight: 700;
+                line-height: 1.15;
+                min-height: 2.45rem;
+                padding-top: 0.45rem;
+                text-align: center;
+                overflow-wrap: anywhere;
             }
 
             [data-testid="stCaptionContainer"],
@@ -2440,6 +2565,82 @@ def normalize_lift_output_table(table: pd.DataFrame) -> pd.DataFrame:
     return output_table
 
 
+def parse_percent_points(value: object) -> float | None:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return numeric * 100 if -1 <= numeric <= 1 else numeric
+
+    text = str(value).strip()
+    if not text or text in {NOT_AVAILABLE, NOT_TESTED}:
+        return None
+
+    match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)\s*%", text)
+    if not match:
+        return None
+    return float(match.group(1))
+
+
+def parse_lift_points(value: object) -> float | None:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    text = str(value).strip()
+    if not text or text in {NOT_AVAILABLE, NOT_TESTED}:
+        return None
+
+    match = re.fullmatch(
+        r"([+-]?\d+(?:\.\d+)?)\s*(?:pts?|pp|percentage points)?",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return float(match.group(1))
+
+
+def short_chart_label(label: object, max_length: int = 34) -> str:
+    text = normalize_answer(label) or NOT_AVAILABLE
+    if len(text) <= max_length:
+        return text
+    return f"{text[: max_length - 3].rstrip()}..."
+
+
+def norm_chart_rows(table: pd.DataFrame) -> list[dict]:
+    display_table = normalize_lift_output_table(table)
+    chart_rows = []
+    for row in display_table.to_dict("records"):
+        label = normalize_answer(row.get("Response option"))
+        if not label or label.lower().startswith("base size"):
+            continue
+
+        control_points = parse_percent_points(row.get("Control"))
+        test_points = parse_percent_points(row.get("Test"))
+        if control_points is None or test_points is None:
+            continue
+
+        lift_points = parse_lift_points(row.get("Lift"))
+        if lift_points is None:
+            lift_points = test_points - control_points
+
+        chart_rows.append(
+            {
+                "label": label,
+                "chart_label": short_chart_label(label),
+                "control_points": control_points,
+                "test_points": test_points,
+                "lift_points": lift_points,
+            }
+        )
+
+    return chart_rows
+
+
 
 def calculate_norm_table(
     df: pd.DataFrame,
@@ -3605,6 +3806,109 @@ def excel_safe_sheet_name(name: str, used_names: set[str]) -> str:
     return candidate
 
 
+def add_norm_chart_to_excel_sheet(worksheet, table: pd.DataFrame) -> None:
+    chart_rows = norm_chart_rows(table)
+    if not chart_rows:
+        return
+
+    table_col_count = max(worksheet.max_column, len(table.columns))
+    chart_col = table_col_count + 2
+    chart_data_row = 21
+    chart_row_count = len(chart_rows)
+    chart_data_headers = ["Response option", "Control", "Test", "Lift"]
+
+    worksheet.cell(row=1, column=chart_col, value="Control vs Test").font = Font(
+        bold=True,
+        color=VN_BLACK,
+    )
+    worksheet.cell(row=2, column=chart_col, value="Editable chart source below").font = Font(
+        italic=True,
+        color="666666",
+        size=9,
+    )
+
+    header_fill = PatternFill("solid", fgColor=VN_GRAY_50)
+    for offset, header in enumerate(chart_data_headers):
+        cell = worksheet.cell(row=chart_data_row, column=chart_col + offset, value=header)
+        cell.fill = header_fill
+        cell.font = Font(bold=True, color=VN_BLACK)
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_offset, chart_row in enumerate(chart_rows, start=1):
+        source_row = chart_data_row + row_offset
+        worksheet.cell(source_row, chart_col, chart_row["chart_label"])
+        control_cell = worksheet.cell(
+            source_row,
+            chart_col + 1,
+            chart_row["control_points"] / 100,
+        )
+        test_cell = worksheet.cell(
+            source_row,
+            chart_col + 2,
+            chart_row["test_points"] / 100,
+        )
+        lift_cell = worksheet.cell(
+            source_row,
+            chart_col + 3,
+            round_percentage_points(chart_row["lift_points"]),
+        )
+        control_cell.number_format = "0%"
+        test_cell.number_format = "0%"
+        lift_cell.number_format = "+0;-0;0"
+        lift_cell.fill = PatternFill("solid", fgColor=VN_WHITE)
+        lift_cell.font = Font(bold=True, color="4C5361")
+        lift_cell.alignment = Alignment(horizontal="center")
+
+    worksheet.column_dimensions[get_column_letter(chart_col)].width = 24
+    worksheet.column_dimensions[get_column_letter(chart_col + 1)].width = 11
+    worksheet.column_dimensions[get_column_letter(chart_col + 2)].width = 11
+    worksheet.column_dimensions[get_column_letter(chart_col + 3)].width = 9
+
+    chart = BarChart()
+    chart.type = "col"
+    chart.style = 10
+    chart.title = "Control vs Test"
+    chart.y_axis.title = "%"
+    chart.y_axis.numFmt = "0%"
+    chart.y_axis.scaling.min = 0
+    max_points = max(
+        max(row["control_points"], row["test_points"])
+        for row in chart_rows
+    )
+    chart.y_axis.scaling.max = max(1, math.ceil((max_points / 100) * 10) / 10)
+    chart.legend.position = "b"
+    chart.height = 7.0
+    chart.width = max(8.6, min(15.0, 2.0 + chart_row_count * 1.45))
+
+    data = Reference(
+        worksheet,
+        min_col=chart_col + 1,
+        max_col=chart_col + 2,
+        min_row=chart_data_row,
+        max_row=chart_data_row + chart_row_count,
+    )
+    categories = Reference(
+        worksheet,
+        min_col=chart_col,
+        min_row=chart_data_row + 1,
+        max_row=chart_data_row + chart_row_count,
+    )
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(categories)
+    chart.dataLabels = DataLabelList()
+    chart.dataLabels.showVal = True
+    chart.dataLabels.numFmt = "0%"
+    chart.dataLabels.dLblPos = "outEnd"
+
+    if len(chart.series) >= 2:
+        chart.series[0].graphicalProperties.solidFill = VN_CONTROL_GRAY
+        chart.series[0].graphicalProperties.line.solidFill = VN_CONTROL_GRAY
+        chart.series[1].graphicalProperties.solidFill = VN_PINK
+        chart.series[1].graphicalProperties.line.solidFill = VN_PINK
+
+    worksheet.add_chart(chart, f"{get_column_letter(chart_col)}3")
+
+
 def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
     output = BytesIO()
     used_names = {"All Norms"}
@@ -3620,6 +3924,7 @@ def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
         for question, table in output_tables.items():
             sheet_name = excel_safe_sheet_name(question, used_names)
             table.to_excel(writer, sheet_name=sheet_name, index=False)
+            add_norm_chart_to_excel_sheet(writer.book[sheet_name], table)
 
     return output.getvalue()
 
@@ -5697,7 +6002,7 @@ def render_saved_norm_tables_review() -> None:
         source_variables = source_variables_by_metric.get(metric, [])
         if source_variables:
             st.caption(f"Source variable: {', '.join(source_variables)}")
-        render_norm_table(metric_table.reset_index(drop=True))
+        render_norm_table_with_chart(metric_table.reset_index(drop=True))
 
     st.download_button(
         "Download saved norms Excel",
@@ -5721,8 +6026,59 @@ def render_vn_table(table: pd.DataFrame) -> None:
     )
 
 
+def chart_bar_height(points: float) -> float:
+    return max(0, min(100, points))
+
+
+def render_norm_bar_chart(table: pd.DataFrame) -> None:
+    chart_rows = norm_chart_rows(table)
+    if not chart_rows:
+        st.caption("No chartable control/test percentages are available.")
+        return
+
+    groups = []
+    for row in chart_rows:
+        control_height = chart_bar_height(row["control_points"])
+        test_height = chart_bar_height(row["test_points"])
+        lift_label = format_lift_points(row["lift_points"]).replace("pts", "")
+        groups.append(
+            '<div class="vn-chart-group">'
+            '<div class="vn-chart-plot">'
+            '<div class="vn-chart-bar-column">'
+            f'<div class="vn-chart-value control">{escape(format_percent_points(row["control_points"]))}</div>'
+            f'<div class="vn-chart-bar control" style="height:{control_height:.1f}%"></div>'
+            "</div>"
+            '<div class="vn-chart-bar-column">'
+            f'<div class="vn-chart-value test">{escape(format_percent_points(row["test_points"]))}</div>'
+            f'<div class="vn-chart-bar test" style="height:{test_height:.1f}%"></div>'
+            "</div>"
+            f'<div class="vn-lift-bubble">{escape(lift_label)}</div>'
+            "</div>"
+            f'<div class="vn-chart-label">{escape(row["chart_label"])}</div>'
+            "</div>"
+        )
+
+    st.markdown(
+        '<div class="vn-chart-card">'
+        '<div class="vn-chart-title">Control vs test</div>'
+        '<div class="vn-chart-scroll">'
+        f'{"".join(groups)}'
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_norm_table(table: pd.DataFrame) -> None:
     render_vn_table(normalize_lift_output_table(table))
+
+
+def render_norm_table_with_chart(table: pd.DataFrame) -> None:
+    table_col, chart_col = st.columns([1.35, 1], gap="large")
+    with table_col:
+        render_norm_table(table)
+    with chart_col:
+        render_norm_bar_chart(table)
 
 
 def main() -> None:

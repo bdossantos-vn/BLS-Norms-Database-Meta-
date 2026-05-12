@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Added control-vs-test bar charts beside each Norm tables question, with grey control bars, VN pink test bars, percent labels, and lift bubbles.
+- Added editable native charts and chart source ranges to each question sheet in the saved norms Excel export.
 - Added saved-dataset version history with a baseline restore point plus restore points for saves, replacements, rule edits, deletions, and restores.
 - Changed saved-dataset and version-history preview tables to use the same white BLS table style as Norm tables.
 - Changed Version history to show a restore dropdown with a saved-datasets preview for the selected version instead of a full history grid.
