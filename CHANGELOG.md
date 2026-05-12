@@ -6,6 +6,7 @@
 - Changed on-page Norm table charts to show full wrapped response labels instead of ellipses.
 - Added chart legends for Control, Test, and Lift markers on Norm tables.
 - Colored lift bubble text green/red only for statistically significant positive/negative lift.
+- Changed Google Sheets norm-chart export back to two visible series only, with Control/Test legend entries and x-axis labels set below metric-label size.
 - Retuned Google Sheets exported norm-chart helper labels to 8.5pt while keeping metric labels at 11pt.
 - Removed the exported helper-series label header from chart legends and reduced helper category-label sizing.
 - Replaced exported norm-chart category-axis labels with a hidden helper series and smaller data-label category names so Excel cannot inflate axis text.

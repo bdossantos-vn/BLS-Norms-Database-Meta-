@@ -22,7 +22,6 @@ import re
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.label import DataLabelList
-from openpyxl.chart.legend import LegendEntry
 from openpyxl.chart.text import RichText
 from openpyxl.drawing.text import (
     CharacterProperties,
@@ -4057,7 +4056,7 @@ def write_chart_source_table(
     start_row: int,
     start_col: int,
 ) -> None:
-    headers = ["Response option", "Control", "Test", "", "Lift", "Significance"]
+    headers = ["Response option", "Control", "Test", "Lift", "Significance"]
     worksheet.cell(row=start_row - 2, column=start_col, value="Editable chart source").font = Font(
         bold=True,
         size=10,
@@ -4086,7 +4085,6 @@ def write_chart_source_table(
             chart_label,
             chart_row["control_points"] / 100,
             chart_row["test_points"] / 100,
-            0,
             f"{lift_points:+d}",
             "Significant" if chart_row["significant"] else "Not significant",
         ]
@@ -4104,15 +4102,14 @@ def write_chart_source_table(
             )
             if col_offset in {1, 2}:
                 cell.number_format = "0%"
-            if col_offset == 4:
+            if col_offset == 3:
                 cell.fill = PatternFill("solid", fgColor=VN_WHITE)
                 cell.font = Font(bold=True, color=excel_lift_font_color(chart_row))
         worksheet.row_dimensions[source_row].height = max(24, 15 * (chart_label.count("\n") + 1))
 
-    source_widths = [28, 11, 11, 8, 9, 16]
+    source_widths = [28, 11, 11, 9, 16]
     for offset, width in enumerate(source_widths):
         worksheet.column_dimensions[get_column_letter(start_col + offset)].width = width
-    worksheet.column_dimensions[get_column_letter(start_col + 3)].hidden = True
 
 
 def excel_chart_text(size: int, bold: bool = False, color: str = VN_BLACK) -> RichText:
@@ -4174,7 +4171,7 @@ def excel_chart_text_xml(size: int, bold: bool = False, color: str = VN_BLACK) -
 def patch_excel_chart_text_defaults(workbook_bytes: bytes) -> bytes:
     source = BytesIO(workbook_bytes)
     patched = BytesIO()
-    chart_default_text = excel_chart_text_xml(850)
+    chart_default_text = excel_chart_text_xml(1000)
 
     with zipfile.ZipFile(source, "r") as source_zip:
         with zipfile.ZipFile(patched, "w", zipfile.ZIP_DEFLATED) as patched_zip:
@@ -4213,13 +4210,11 @@ def add_native_norm_excel_chart(
     chart.y_axis.delete = True
     chart.y_axis.majorGridlines = None
     chart.x_axis.majorGridlines = None
-    chart.x_axis.delete = True
     chart.x_axis.majorTickMark = "none"
     chart.x_axis.minorTickMark = "none"
-    chart.x_axis.txPr = excel_chart_text(850)
+    chart.x_axis.txPr = excel_chart_text(1000)
     chart.legend.position = "l"
     chart.legend.overlay = False
-    chart.legend.legendEntry = [LegendEntry(idx=2, delete=True)]
     chart.legend.txPr = excel_chart_text(1100, bold=True)
     chart.height = 9.4
     chart.width = max(22.0, min(32.0, 11.0 + chart_row_count * 2.25))
@@ -4239,7 +4234,7 @@ def add_native_norm_excel_chart(
     data = Reference(
         worksheet,
         min_col=source_col + 1,
-        max_col=source_col + 3,
+        max_col=source_col + 2,
         min_row=source_row,
         max_row=source_row + chart_row_count,
     )
@@ -4265,16 +4260,6 @@ def add_native_norm_excel_chart(
         chart.series[0].graphicalProperties.line.solidFill = VN_CONTROL_GRAY
         chart.series[1].graphicalProperties.solidFill = VN_PINK
         chart.series[1].graphicalProperties.line.solidFill = VN_PINK
-
-    if len(chart.series) >= 3:
-        chart.series[2].dLbls = DataLabelList(
-            showCatName=True,
-            showVal=False,
-            dLblPos="b",
-            txPr=excel_chart_text(850),
-        )
-        chart.series[2].graphicalProperties.noFill = True
-        chart.series[2].graphicalProperties.line.noFill = True
 
     worksheet.add_chart(chart, f"A{anchor_row}")
 
