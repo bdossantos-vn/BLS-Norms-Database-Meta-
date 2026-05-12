@@ -4050,11 +4050,12 @@ def write_chart_source_table(
 
     for row_offset, chart_row in enumerate(chart_rows, start=1):
         source_row = start_row + row_offset
+        lift_points = round_percentage_points(chart_row["lift_points"])
         values = [
             chart_row["label"],
             chart_row["control_points"] / 100,
             chart_row["test_points"] / 100,
-            round_percentage_points(chart_row["lift_points"]),
+            f"{lift_points:+d}",
             "Significant" if chart_row["significant"] else "Not significant",
         ]
         for col_offset, value in enumerate(values):
@@ -4072,7 +4073,6 @@ def write_chart_source_table(
             if col_offset in {1, 2}:
                 cell.number_format = "0%"
             if col_offset == 3:
-                cell.number_format = "+0;-0;0"
                 cell.fill = PatternFill("solid", fgColor=VN_WHITE)
                 cell.font = Font(bold=True, color=excel_lift_font_color(chart_row))
         worksheet.row_dimensions[source_row].height = 24
@@ -4120,11 +4120,13 @@ def add_native_norm_excel_chart(
     chart.x_axis.majorGridlines = None
     chart.x_axis.majorTickMark = "none"
     chart.x_axis.minorTickMark = "none"
-    chart.x_axis.txPr = excel_chart_text(1100, bold=True)
-    chart.legend.position = "t"
+    chart.x_axis.txPr = excel_chart_text(950, bold=True)
+    chart.legend.position = "l"
     chart.legend.txPr = excel_chart_text(1100, bold=True)
     chart.height = 8.3
     chart.width = max(15.5, min(29.0, 7.0 + chart_row_count * 1.7))
+    chart.gapWidth = 60
+    chart.overlap = 0
 
     max_points = max(
         max(row["control_points"], row["test_points"])
@@ -4151,7 +4153,7 @@ def add_native_norm_excel_chart(
     chart.dataLabels.showVal = True
     chart.dataLabels.numFmt = "0%"
     chart.dataLabels.dLblPos = "outEnd"
-    chart.dataLabels.txPr = excel_chart_text(1400, bold=True)
+    chart.dataLabels.txPr = excel_chart_text(1500, bold=True)
 
     if len(chart.series) >= 2:
         chart.series[0].graphicalProperties.solidFill = VN_CONTROL_GRAY
