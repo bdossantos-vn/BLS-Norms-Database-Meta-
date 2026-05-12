@@ -19,8 +19,6 @@ from pathlib import Path
 import re
 
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, Reference
-from openpyxl.chart.label import DataLabelList
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
@@ -4080,6 +4078,168 @@ def write_chart_source_table(
         worksheet.column_dimensions[get_column_letter(start_col + offset)].width = width
 
 
+def fill_excel_cell_chart_bar(
+    worksheet,
+    column: int,
+    plot_top_row: int,
+    plot_bottom_row: int,
+    segments: int,
+    fill_color: str,
+) -> None:
+    if segments <= 0:
+        return
+    start_row = plot_bottom_row - segments + 1
+    for row in range(start_row, plot_bottom_row + 1):
+        worksheet.cell(row=row, column=column).fill = PatternFill("solid", fgColor=fill_color)
+
+
+def write_excel_cell_chart_value_label(
+    worksheet,
+    column: int,
+    plot_top_row: int,
+    plot_bottom_row: int,
+    segments: int,
+    label: str,
+    color: str,
+) -> None:
+    label_row = max(plot_top_row, plot_bottom_row - max(segments, 1))
+    cell = worksheet.cell(row=label_row, column=column, value=label)
+    cell.font = Font(bold=True, size=12, color=color)
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+
+
+def write_excel_cell_chart(
+    worksheet,
+    chart_rows: list[dict],
+    start_row: int,
+    start_col: int = 1,
+) -> int:
+    if not chart_rows:
+        return start_row
+
+    plot_rows = 12
+    plot_top_row = start_row + 4
+    plot_bottom_row = plot_top_row + plot_rows - 1
+    label_row = plot_bottom_row + 2
+    max_points = max(
+        max(row["control_points"], row["test_points"])
+        for row in chart_rows
+    )
+    axis_max = max(10, math.ceil(max_points / 10) * 10)
+    border = excel_thin_border()
+
+    title_cell = worksheet.cell(row=start_row, column=start_col, value="Control vs test")
+    title_cell.font = Font(bold=True, size=12, color=VN_BLACK)
+    title_cell.alignment = Alignment(vertical="center")
+    worksheet.row_dimensions[start_row].height = 22
+
+    legend_col = start_col + 3
+    legend_items = [
+        ("Control", VN_CONTROL_GRAY),
+        ("Test", VN_PINK),
+        ("Lift", VN_WHITE),
+    ]
+    for offset, (label, color) in enumerate(legend_items):
+        swatch = worksheet.cell(row=start_row, column=legend_col + offset * 2, value="")
+        swatch.fill = PatternFill("solid", fgColor=color)
+        swatch.border = border
+        legend_label = worksheet.cell(
+            row=start_row,
+            column=legend_col + offset * 2 + 1,
+            value=label,
+        )
+        legend_label.font = Font(bold=True, size=10, color=VN_BLACK)
+        legend_label.alignment = Alignment(horizontal="left", vertical="center")
+
+    for row in range(plot_top_row, plot_bottom_row + 1):
+        worksheet.row_dimensions[row].height = 16
+    worksheet.row_dimensions[label_row].height = 38
+
+    for index, chart_row in enumerate(chart_rows):
+        control_col = start_col + index * 3
+        test_col = control_col + 1
+        spacer_col = control_col + 2
+        worksheet.column_dimensions[get_column_letter(control_col)].width = 7.2
+        worksheet.column_dimensions[get_column_letter(test_col)].width = 7.2
+        worksheet.column_dimensions[get_column_letter(spacer_col)].width = 2
+
+        control_segments = round((chart_row["control_points"] / axis_max) * plot_rows)
+        test_segments = round((chart_row["test_points"] / axis_max) * plot_rows)
+        fill_excel_cell_chart_bar(
+            worksheet,
+            control_col,
+            plot_top_row,
+            plot_bottom_row,
+            control_segments,
+            VN_CONTROL_GRAY,
+        )
+        fill_excel_cell_chart_bar(
+            worksheet,
+            test_col,
+            plot_top_row,
+            plot_bottom_row,
+            test_segments,
+            VN_PINK,
+        )
+        write_excel_cell_chart_value_label(
+            worksheet,
+            control_col,
+            plot_top_row,
+            plot_bottom_row,
+            control_segments,
+            format_percent_points(chart_row["control_points"]),
+            "AEB7C1",
+        )
+        write_excel_cell_chart_value_label(
+            worksheet,
+            test_col,
+            plot_top_row,
+            plot_bottom_row,
+            test_segments,
+            format_percent_points(chart_row["test_points"]),
+            VN_PINK,
+        )
+
+        bubble_row = max(
+            plot_top_row + 1,
+            plot_bottom_row - max(control_segments, test_segments, 1) + 2,
+        )
+        bubble_row = min(bubble_row, label_row - 3)
+        worksheet.merge_cells(
+            start_row=bubble_row,
+            start_column=control_col,
+            end_row=bubble_row + 1,
+            end_column=test_col,
+        )
+        bubble_cell = worksheet.cell(
+            row=bubble_row,
+            column=control_col,
+            value=format_lift_points(chart_row["lift_points"]).replace("pts", ""),
+        )
+        bubble_cell.fill = PatternFill("solid", fgColor=VN_WHITE)
+        bubble_cell.border = border
+        bubble_cell.font = Font(bold=True, size=12, color=excel_lift_font_color(chart_row))
+        bubble_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        worksheet.cell(row=plot_bottom_row + 1, column=control_col).border = Border(
+            top=Side(style="thin", color=VN_GRAY_200)
+        )
+        worksheet.cell(row=plot_bottom_row + 1, column=test_col).border = Border(
+            top=Side(style="thin", color=VN_GRAY_200)
+        )
+        worksheet.merge_cells(
+            start_row=label_row,
+            start_column=control_col,
+            end_row=label_row,
+            end_column=test_col,
+        )
+        label_cell = worksheet.cell(row=label_row, column=control_col, value=chart_row["label"])
+        label_cell.font = Font(bold=True, size=10, color=VN_BLACK)
+        label_cell.alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
+
+    return label_row + 2
+
+
 def add_norm_chart_to_excel_sheet(
     worksheet,
     table: pd.DataFrame,
@@ -4091,60 +4251,8 @@ def add_norm_chart_to_excel_sheet(
 
     chart_col = len(table.columns) + 2
     chart_data_row = 6
-    chart_row_count = len(chart_rows)
     write_chart_source_table(worksheet, chart_rows, chart_data_row, chart_col)
-
-    chart = BarChart()
-    chart.type = "col"
-    chart.style = 13
-    chart.title = "Control vs Test"
-    chart.y_axis.numFmt = "0%"
-    chart.y_axis.scaling.min = 0
-    chart.y_axis.delete = True
-    max_points = max(
-        max(row["control_points"], row["test_points"])
-        for row in chart_rows
-    )
-    chart.y_axis.scaling.max = max(1, math.ceil((max_points / 100) * 10) / 10)
-    chart.x_axis.majorTickMark = "none"
-    chart.x_axis.minorTickMark = "none"
-    chart.legend.position = "t"
-    chart.height = 8.1
-    chart.width = max(15.0, min(27.0, 6.5 + chart_row_count * 1.55))
-
-    data = Reference(
-        worksheet,
-        min_col=chart_col + 1,
-        max_col=chart_col + 2,
-        min_row=chart_data_row,
-        max_row=chart_data_row + chart_row_count,
-    )
-    categories = Reference(
-        worksheet,
-        min_col=chart_col,
-        min_row=chart_data_row + 1,
-        max_row=chart_data_row + chart_row_count,
-    )
-    chart.add_data(data, titles_from_data=True)
-    chart.set_categories(categories)
-    chart.dataLabels = DataLabelList()
-    chart.dataLabels.showVal = True
-    chart.dataLabels.numFmt = "0%"
-    chart.dataLabels.dLblPos = "outEnd"
-
-    if len(chart.series) >= 2:
-        chart.series[0].graphicalProperties.solidFill = VN_CONTROL_GRAY
-        chart.series[0].graphicalProperties.line.solidFill = VN_CONTROL_GRAY
-        chart.series[1].graphicalProperties.solidFill = VN_PINK
-        chart.series[1].graphicalProperties.line.solidFill = VN_PINK
-
-    chart_anchor_row = table_end_row + 3
-    worksheet.cell(row=chart_anchor_row - 1, column=1, value="Control vs test").font = Font(
-        bold=True,
-        size=12,
-        color=VN_BLACK,
-    )
-    worksheet.add_chart(chart, f"A{chart_anchor_row}")
+    write_excel_cell_chart(worksheet, chart_rows, table_end_row + 3)
 
 
 def write_all_norms_sheet(
