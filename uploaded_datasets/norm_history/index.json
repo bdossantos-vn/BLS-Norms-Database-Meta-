@@ -1,5 +1,23 @@
 [
   {
+    "action": "Restore version",
+    "created_at": "2026-05-12 14:14:29",
+    "dataset_count": 1,
+    "dataset_id": "Not available",
+    "dataset_label": "Not available",
+    "note": "Restored version 20260512141144_Baseline.",
+    "version_id": "20260512141429_Restore_version"
+  },
+  {
+    "action": "Before restore",
+    "created_at": "2026-05-12 14:14:29",
+    "dataset_count": 0,
+    "dataset_id": "Not available",
+    "dataset_label": "Not available",
+    "note": "Automatic safety snapshot before restoring 20260512141144_Baseline.",
+    "version_id": "20260512141429_Before_restore"
+  },
+  {
     "action": "Delete dataset",
     "created_at": "2026-05-12 14:13:10",
     "dataset_count": 0,
