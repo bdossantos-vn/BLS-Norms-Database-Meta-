@@ -4148,7 +4148,7 @@ def add_native_norm_excel_chart(
     chart.x_axis.majorGridlines = None
     chart.x_axis.majorTickMark = "none"
     chart.x_axis.minorTickMark = "none"
-    chart.x_axis.txPr = excel_chart_text(1100, bold=True)
+    chart.x_axis.txPr = excel_chart_text(850, bold=True)
     chart.legend.position = "l"
     chart.legend.overlay = False
     chart.legend.txPr = excel_chart_text(1100, bold=True)
