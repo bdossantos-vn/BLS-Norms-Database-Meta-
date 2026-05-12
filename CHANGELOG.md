@@ -7,6 +7,7 @@
 - Added chart legends for Control, Test, and Lift markers on Norm tables.
 - Colored lift bubble text green/red only for statistically significant positive/negative lift.
 - Added editable native charts and chart source ranges to each question sheet in the saved norms Excel export.
+- Improved saved norms Excel export formatting with sectioned All Norms tables, app-style headers, spacing, and full-width charts below each table.
 - Added saved-dataset version history with a baseline restore point plus restore points for saves, replacements, rule edits, deletions, and restores.
 - Changed saved-dataset and version-history preview tables to use the same white BLS table style as Norm tables.
 - Changed Version history to show a restore dropdown with a saved-datasets preview for the selected version instead of a full history grid.

@@ -18,9 +18,10 @@ from io import BytesIO
 from pathlib import Path
 import re
 
+from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.label import DataLabelList
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
 import streamlit as st
@@ -81,6 +82,9 @@ VN_BLACK = "000000"
 VN_WHITE = "FFFFFF"
 VN_GRAY_50 = "F8F8FA"
 VN_GRAY_200 = "E2E5EA"
+VN_GRAY_400 = "8A8F98"
+VN_GREEN = "15803D"
+VN_SIG_RED = "D92D20"
 SMART_TABLES_LAYOUT = "BLS / Smart Tables layout"
 RESPONDENT_ROWS_LAYOUT = "Standard respondent table"
 DATA_LAYOUT_OPTIONS = [SMART_TABLES_LAYOUT, RESPONDENT_ROWS_LAYOUT]
@@ -3897,79 +3901,216 @@ def excel_safe_sheet_name(name: str, used_names: set[str]) -> str:
     return candidate
 
 
-def add_norm_chart_to_excel_sheet(worksheet, table: pd.DataFrame) -> None:
+def excel_cell_value(value: object) -> object:
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value
+
+
+def excel_thin_border() -> Border:
+    side = Side(style="thin", color=VN_GRAY_200)
+    return Border(left=side, right=side, top=side, bottom=side)
+
+
+def set_excel_column_widths(worksheet, start_col: int, columns: list[str]) -> None:
+    width_by_column = {
+        "Response option": 34,
+        "Control": 13,
+        "Test": 13,
+        "Lift": 13,
+        "Significance result": 22,
+    }
+    for offset, column in enumerate(columns):
+        width = width_by_column.get(str(column), 16)
+        worksheet.column_dimensions[get_column_letter(start_col + offset)].width = width
+
+
+def write_excel_sheet_header(
+    worksheet,
+    title: str,
+    subtitle: str = "",
+    end_col: int = 5,
+) -> None:
+    worksheet.sheet_view.showGridLines = False
+    worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_col)
+    title_cell = worksheet.cell(row=1, column=1, value=title)
+    title_cell.font = Font(bold=True, size=18, color=VN_BLACK)
+    title_cell.alignment = Alignment(vertical="center")
+    worksheet.row_dimensions[1].height = 28
+
+    if subtitle:
+        worksheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=end_col)
+        subtitle_cell = worksheet.cell(row=2, column=1, value=subtitle)
+        subtitle_cell.font = Font(size=10, color=VN_GRAY_400)
+        subtitle_cell.alignment = Alignment(wrap_text=True, vertical="top")
+        worksheet.row_dimensions[2].height = 28
+
+    for col in range(1, end_col + 1):
+        accent_cell = worksheet.cell(row=3, column=col)
+        accent_cell.fill = PatternFill("solid", fgColor=VN_PINK if col <= 2 else VN_BLACK)
+    worksheet.row_dimensions[3].height = 4
+
+
+def write_section_title(
+    worksheet,
+    row: int,
+    title: str,
+    end_col: int = 5,
+) -> None:
+    worksheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=end_col)
+    cell = worksheet.cell(row=row, column=1, value=title)
+    cell.font = Font(bold=True, size=14, color=VN_BLACK)
+    cell.alignment = Alignment(vertical="center")
+    cell.border = Border(bottom=Side(style="medium", color=VN_PINK))
+    worksheet.row_dimensions[row].height = 24
+
+
+def write_norm_table_to_excel(
+    worksheet,
+    table: pd.DataFrame,
+    start_row: int,
+    start_col: int = 1,
+) -> int:
+    columns = [str(column) for column in table.columns]
+    border = excel_thin_border()
+    header_fill = PatternFill("solid", fgColor=VN_GRAY_50)
+    alt_fill = PatternFill("solid", fgColor=VN_GRAY_50)
+
+    for col_offset, column in enumerate(columns):
+        cell = worksheet.cell(row=start_row, column=start_col + col_offset, value=column)
+        cell.fill = header_fill
+        cell.font = Font(bold=True, color=VN_BLACK)
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        cell.border = border
+
+    for row_offset, row in enumerate(table.itertuples(index=False, name=None), start=1):
+        excel_row = start_row + row_offset
+        fill = alt_fill if row_offset % 2 == 0 else PatternFill(fill_type=None)
+        for col_offset, value in enumerate(row):
+            column_name = columns[col_offset]
+            cell = worksheet.cell(
+                row=excel_row,
+                column=start_col + col_offset,
+                value=excel_cell_value(value),
+            )
+            cell.fill = fill
+            cell.border = border
+            cell.alignment = Alignment(
+                horizontal="center" if column_name in {"Control", "Test", "Lift"} else "left",
+                vertical="center",
+                wrap_text=True,
+            )
+        worksheet.row_dimensions[excel_row].height = 26
+
+    worksheet.row_dimensions[start_row].height = 28
+    set_excel_column_widths(worksheet, start_col, columns)
+    return start_row + len(table)
+
+
+def excel_lift_font_color(chart_row: dict) -> str:
+    if not chart_row.get("significant"):
+        return "4C5361"
+    if chart_row.get("lift_points", 0) > 0:
+        return VN_GREEN
+    if chart_row.get("lift_points", 0) < 0:
+        return VN_SIG_RED
+    return "4C5361"
+
+
+def write_chart_source_table(
+    worksheet,
+    chart_rows: list[dict],
+    start_row: int,
+    start_col: int,
+) -> None:
+    headers = ["Response option", "Control", "Test", "Lift", "Significance"]
+    worksheet.cell(row=start_row - 2, column=start_col, value="Editable chart source").font = Font(
+        bold=True,
+        size=10,
+        color=VN_BLACK,
+    )
+    worksheet.cell(
+        row=start_row - 1,
+        column=start_col,
+        value="Chart links here so Excel and Google Sheets can edit it.",
+    ).font = Font(italic=True, size=9, color=VN_GRAY_400)
+
+    border = excel_thin_border()
+    header_fill = PatternFill("solid", fgColor=VN_GRAY_50)
+    for offset, header in enumerate(headers):
+        cell = worksheet.cell(row=start_row, column=start_col + offset, value=header)
+        cell.fill = header_fill
+        cell.font = Font(bold=True, color=VN_BLACK)
+        cell.alignment = Alignment(horizontal="center")
+        cell.border = border
+
+    for row_offset, chart_row in enumerate(chart_rows, start=1):
+        source_row = start_row + row_offset
+        values = [
+            chart_row["label"],
+            chart_row["control_points"] / 100,
+            chart_row["test_points"] / 100,
+            round_percentage_points(chart_row["lift_points"]),
+            "Significant" if chart_row["significant"] else "Not significant",
+        ]
+        for col_offset, value in enumerate(values):
+            cell = worksheet.cell(
+                source_row,
+                start_col + col_offset,
+                excel_cell_value(value),
+            )
+            cell.border = border
+            cell.alignment = Alignment(
+                horizontal="center" if col_offset else "left",
+                vertical="center",
+                wrap_text=True,
+            )
+            if col_offset in {1, 2}:
+                cell.number_format = "0%"
+            if col_offset == 3:
+                cell.number_format = "+0;-0;0"
+                cell.fill = PatternFill("solid", fgColor=VN_WHITE)
+                cell.font = Font(bold=True, color=excel_lift_font_color(chart_row))
+        worksheet.row_dimensions[source_row].height = 24
+
+    source_widths = [28, 11, 11, 9, 16]
+    for offset, width in enumerate(source_widths):
+        worksheet.column_dimensions[get_column_letter(start_col + offset)].width = width
+
+
+def add_norm_chart_to_excel_sheet(
+    worksheet,
+    table: pd.DataFrame,
+    table_end_row: int,
+) -> None:
     chart_rows = norm_chart_rows(table)
     if not chart_rows:
         return
 
-    table_col_count = max(worksheet.max_column, len(table.columns))
-    chart_col = table_col_count + 2
-    chart_data_row = 21
+    chart_col = len(table.columns) + 2
+    chart_data_row = 6
     chart_row_count = len(chart_rows)
-    chart_data_headers = ["Response option", "Control", "Test", "Lift"]
-
-    worksheet.cell(row=1, column=chart_col, value="Control vs Test").font = Font(
-        bold=True,
-        color=VN_BLACK,
-    )
-    worksheet.cell(row=2, column=chart_col, value="Editable chart source below").font = Font(
-        italic=True,
-        color="666666",
-        size=9,
-    )
-
-    header_fill = PatternFill("solid", fgColor=VN_GRAY_50)
-    for offset, header in enumerate(chart_data_headers):
-        cell = worksheet.cell(row=chart_data_row, column=chart_col + offset, value=header)
-        cell.fill = header_fill
-        cell.font = Font(bold=True, color=VN_BLACK)
-        cell.alignment = Alignment(horizontal="center")
-
-    for row_offset, chart_row in enumerate(chart_rows, start=1):
-        source_row = chart_data_row + row_offset
-        worksheet.cell(source_row, chart_col, chart_row["chart_label"])
-        control_cell = worksheet.cell(
-            source_row,
-            chart_col + 1,
-            chart_row["control_points"] / 100,
-        )
-        test_cell = worksheet.cell(
-            source_row,
-            chart_col + 2,
-            chart_row["test_points"] / 100,
-        )
-        lift_cell = worksheet.cell(
-            source_row,
-            chart_col + 3,
-            round_percentage_points(chart_row["lift_points"]),
-        )
-        control_cell.number_format = "0%"
-        test_cell.number_format = "0%"
-        lift_cell.number_format = "+0;-0;0"
-        lift_cell.fill = PatternFill("solid", fgColor=VN_WHITE)
-        lift_cell.font = Font(bold=True, color="4C5361")
-        lift_cell.alignment = Alignment(horizontal="center")
-
-    worksheet.column_dimensions[get_column_letter(chart_col)].width = 24
-    worksheet.column_dimensions[get_column_letter(chart_col + 1)].width = 11
-    worksheet.column_dimensions[get_column_letter(chart_col + 2)].width = 11
-    worksheet.column_dimensions[get_column_letter(chart_col + 3)].width = 9
+    write_chart_source_table(worksheet, chart_rows, chart_data_row, chart_col)
 
     chart = BarChart()
     chart.type = "col"
-    chart.style = 10
+    chart.style = 13
     chart.title = "Control vs Test"
-    chart.y_axis.title = "%"
     chart.y_axis.numFmt = "0%"
     chart.y_axis.scaling.min = 0
+    chart.y_axis.delete = True
     max_points = max(
         max(row["control_points"], row["test_points"])
         for row in chart_rows
     )
     chart.y_axis.scaling.max = max(1, math.ceil((max_points / 100) * 10) / 10)
-    chart.legend.position = "b"
-    chart.height = 7.0
-    chart.width = max(8.6, min(15.0, 2.0 + chart_row_count * 1.45))
+    chart.x_axis.majorTickMark = "none"
+    chart.x_axis.minorTickMark = "none"
+    chart.legend.position = "t"
+    chart.height = 8.1
+    chart.width = max(15.0, min(27.0, 6.5 + chart_row_count * 1.55))
 
     data = Reference(
         worksheet,
@@ -3997,7 +4138,53 @@ def add_norm_chart_to_excel_sheet(worksheet, table: pd.DataFrame) -> None:
         chart.series[1].graphicalProperties.solidFill = VN_PINK
         chart.series[1].graphicalProperties.line.solidFill = VN_PINK
 
-    worksheet.add_chart(chart, f"{get_column_letter(chart_col)}3")
+    chart_anchor_row = table_end_row + 3
+    worksheet.cell(row=chart_anchor_row - 1, column=1, value="Control vs test").font = Font(
+        bold=True,
+        size=12,
+        color=VN_BLACK,
+    )
+    worksheet.add_chart(chart, f"A{chart_anchor_row}")
+
+
+def write_all_norms_sheet(
+    workbook: Workbook,
+    output_tables: dict[str, pd.DataFrame],
+) -> None:
+    worksheet = workbook.active
+    worksheet.title = "All Norms"
+    write_excel_sheet_header(
+        worksheet,
+        "All Norm Tables",
+        "Each section mirrors the app view with space between tables for review.",
+        end_col=5,
+    )
+    current_row = 5
+    for question, table in output_tables.items():
+        write_section_title(worksheet, current_row, str(question), end_col=len(table.columns))
+        table_start_row = current_row + 2
+        table_end_row = write_norm_table_to_excel(worksheet, table, table_start_row)
+        current_row = table_end_row + 4
+    worksheet.freeze_panes = "A5"
+
+
+def write_question_sheet(
+    workbook: Workbook,
+    sheet_name: str,
+    question: str,
+    table: pd.DataFrame,
+) -> None:
+    worksheet = workbook.create_sheet(sheet_name)
+    write_excel_sheet_header(
+        worksheet,
+        str(question),
+        "Norm table and editable control-vs-test chart.",
+        end_col=11,
+    )
+    table_start_row = 5
+    table_end_row = write_norm_table_to_excel(worksheet, table, table_start_row)
+    add_norm_chart_to_excel_sheet(worksheet, table, table_end_row)
+    worksheet.freeze_panes = "A5"
 
 
 def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
@@ -4008,15 +4195,14 @@ def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
         for question, table in tables.items()
     }
 
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        combined_table = pd.concat(output_tables.values(), ignore_index=True)
-        combined_table.to_excel(writer, sheet_name="All Norms", index=False)
+    workbook = Workbook()
+    write_all_norms_sheet(workbook, output_tables)
 
-        for question, table in output_tables.items():
-            sheet_name = excel_safe_sheet_name(question, used_names)
-            table.to_excel(writer, sheet_name=sheet_name, index=False)
-            add_norm_chart_to_excel_sheet(writer.book[sheet_name], table)
+    for question, table in output_tables.items():
+        sheet_name = excel_safe_sheet_name(question, used_names)
+        write_question_sheet(workbook, sheet_name, str(question), table)
 
+    workbook.save(output)
     return output.getvalue()
 
 
