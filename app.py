@@ -626,21 +626,79 @@ def apply_bls_theme() -> None:
                 color: var(--vn-black) !important;
                 font-size: 0.86rem;
                 font-weight: 800;
+                margin: 0;
+            }
+
+            .vn-chart-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 0.75rem;
                 margin: 0 0 0.65rem 0;
+            }
+
+            .vn-chart-legend {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+                gap: 0.6rem;
+            }
+
+            .vn-chart-legend-item {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.28rem;
+                color: var(--vn-black) !important;
+                font-size: 0.72rem;
+                font-weight: 700;
+                line-height: 1;
+                white-space: nowrap;
+            }
+
+            .vn-chart-legend-swatch {
+                display: inline-block;
+                width: 12px;
+                height: 12px;
+                border-radius: 3px;
+                background: var(--vn-gray-200);
+            }
+
+            .vn-chart-legend-swatch.control {
+                background: #c9d0d8;
+            }
+
+            .vn-chart-legend-swatch.test {
+                background: var(--vn-red);
+            }
+
+            .vn-chart-legend-bubble {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 15px;
+                height: 15px;
+                border: 1px solid var(--vn-gray-200);
+                border-radius: 999px;
+                background: var(--vn-white);
+                color: #4c5361 !important;
+                font-size: 0.65rem;
+                font-weight: 800;
             }
 
             .vn-chart-scroll {
                 display: flex;
-                align-items: flex-end;
-                gap: 1.15rem;
-                overflow-x: auto;
+                align-items: stretch;
+                gap: 0.85rem;
+                overflow-x: visible;
                 padding: 0.25rem 0.1rem 0.2rem 0.1rem;
             }
 
             .vn-chart-group {
                 position: relative;
-                flex: 0 0 132px;
-                min-width: 132px;
+                flex: 1 1 86px;
+                min-width: 68px;
+                max-width: 150px;
             }
 
             .vn-chart-plot {
@@ -649,7 +707,7 @@ def apply_bls_theme() -> None:
                 grid-template-columns: 1fr 1fr;
                 align-items: end;
                 gap: 0.35rem;
-                height: 170px;
+                height: 190px;
                 padding: 0 0.25rem;
                 border-bottom: 1px solid var(--vn-gray-200);
             }
@@ -665,7 +723,7 @@ def apply_bls_theme() -> None:
 
             .vn-chart-value {
                 color: var(--vn-black) !important;
-                font-size: 0.92rem;
+                font-size: 0.88rem;
                 font-weight: 800;
                 line-height: 1;
                 margin-bottom: 0.35rem;
@@ -714,15 +772,28 @@ def apply_bls_theme() -> None:
                 box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
             }
 
+            .vn-lift-bubble.positive {
+                color: #15803d !important;
+            }
+
+            .vn-lift-bubble.negative {
+                color: #d92d20 !important;
+            }
+
+            .vn-lift-bubble.neutral {
+                color: #4c5361 !important;
+            }
+
             .vn-chart-label {
                 color: var(--vn-black) !important;
                 font-size: 0.76rem;
                 font-weight: 700;
                 line-height: 1.15;
-                min-height: 2.45rem;
+                min-height: 3.2rem;
                 padding-top: 0.45rem;
                 text-align: center;
                 overflow-wrap: anywhere;
+                white-space: normal;
             }
 
             [data-testid="stCaptionContainer"],
@@ -738,6 +809,15 @@ def apply_bls_theme() -> None:
 
                 .vn-brand-subtitle {
                     text-align: left;
+                }
+
+                .vn-chart-header {
+                    align-items: flex-start;
+                    flex-direction: column;
+                }
+
+                .vn-chart-legend {
+                    justify-content: flex-start;
                 }
             }
         </style>
@@ -2638,6 +2718,13 @@ def norm_chart_rows(table: pd.DataFrame) -> list[dict]:
             }
         )
 
+    return chart_rows
+
+
+def norm_chart_display_rows(table: pd.DataFrame) -> list[dict]:
+    chart_rows = norm_chart_rows(table)
+    for row in chart_rows:
+        row["chart_label"] = row["label"]
     return chart_rows
 
 
@@ -6030,8 +6117,16 @@ def chart_bar_height(points: float) -> float:
     return max(0, min(100, points))
 
 
+def lift_direction_class(points: float) -> str:
+    if points > 0:
+        return "positive"
+    if points < 0:
+        return "negative"
+    return "neutral"
+
+
 def render_norm_bar_chart(table: pd.DataFrame) -> None:
-    chart_rows = norm_chart_rows(table)
+    chart_rows = norm_chart_display_rows(table)
     if not chart_rows:
         st.caption("No chartable control/test percentages are available.")
         return
@@ -6041,6 +6136,7 @@ def render_norm_bar_chart(table: pd.DataFrame) -> None:
         control_height = chart_bar_height(row["control_points"])
         test_height = chart_bar_height(row["test_points"])
         lift_label = format_lift_points(row["lift_points"]).replace("pts", "")
+        lift_class = lift_direction_class(row["lift_points"])
         groups.append(
             '<div class="vn-chart-group">'
             '<div class="vn-chart-plot">'
@@ -6052,7 +6148,7 @@ def render_norm_bar_chart(table: pd.DataFrame) -> None:
             f'<div class="vn-chart-value test">{escape(format_percent_points(row["test_points"]))}</div>'
             f'<div class="vn-chart-bar test" style="height:{test_height:.1f}%"></div>'
             "</div>"
-            f'<div class="vn-lift-bubble">{escape(lift_label)}</div>'
+            f'<div class="vn-lift-bubble {lift_class}">{escape(lift_label)}</div>'
             "</div>"
             f'<div class="vn-chart-label">{escape(row["chart_label"])}</div>'
             "</div>"
@@ -6060,7 +6156,20 @@ def render_norm_bar_chart(table: pd.DataFrame) -> None:
 
     st.markdown(
         '<div class="vn-chart-card">'
+        '<div class="vn-chart-header">'
         '<div class="vn-chart-title">Control vs test</div>'
+        '<div class="vn-chart-legend">'
+        '<span class="vn-chart-legend-item">'
+        '<span class="vn-chart-legend-swatch control"></span>Control'
+        "</span>"
+        '<span class="vn-chart-legend-item">'
+        '<span class="vn-chart-legend-swatch test"></span>Test'
+        "</span>"
+        '<span class="vn-chart-legend-item">'
+        '<span class="vn-chart-legend-bubble">+/-</span>Lift'
+        "</span>"
+        "</div>"
+        "</div>"
         '<div class="vn-chart-scroll">'
         f'{"".join(groups)}'
         "</div>"
@@ -6074,11 +6183,8 @@ def render_norm_table(table: pd.DataFrame) -> None:
 
 
 def render_norm_table_with_chart(table: pd.DataFrame) -> None:
-    table_col, chart_col = st.columns([1.35, 1], gap="large")
-    with table_col:
-        render_norm_table(table)
-    with chart_col:
-        render_norm_bar_chart(table)
+    render_norm_table(table)
+    render_norm_bar_chart(table)
 
 
 def main() -> None:
