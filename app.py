@@ -4147,7 +4147,7 @@ def add_native_norm_excel_chart(
     chart.x_axis.majorGridlines = None
     chart.x_axis.majorTickMark = "none"
     chart.x_axis.minorTickMark = "none"
-    chart.x_axis.txPr = excel_chart_text(750)
+    chart.x_axis.txPr = excel_chart_text(500)
     chart.legend.position = "l"
     chart.legend.overlay = False
     chart.legend.txPr = excel_chart_text(1100, bold=True)
@@ -4183,7 +4183,7 @@ def add_native_norm_excel_chart(
     chart.dataLabels = DataLabelList()
     chart.dataLabels.showVal = True
     chart.dataLabels.numFmt = "0%"
-    chart.dataLabels.dLblPos = "bestFit"
+    chart.dataLabels.dLblPos = "outEnd"
     chart.dataLabels.txPr = excel_chart_text(1100, bold=True)
 
     if len(chart.series) >= 2:
