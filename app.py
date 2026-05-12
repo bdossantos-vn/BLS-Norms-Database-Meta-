@@ -85,7 +85,10 @@ NORM_DATASET_QUESTION_LABELS_SHEET = "Question Labels"
 NORM_DATASET_RESPONSE_LABELS_SHEET = "Response Labels"
 DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD = 0.8
 SIGNIFICANCE_ALPHA = 0.05
-NORM_EXPORT_VERSION = "google-sheets-axis-labels-v2"
+NORM_EXPORT_VERSION = "google-sheets-ppt-fonts-v1"
+EXCEL_CHART_AXIS_FONT_SIZE = 1300
+EXCEL_CHART_LABEL_FONT_SIZE = 1500
+EXCEL_CHART_LEGEND_FONT_SIZE = 1400
 NO_LABEL_SHEET = "No labels sheet"
 VN_PINK = "FF005C"
 VN_CONTROL_GRAY = "C9D0D8"
@@ -4172,7 +4175,7 @@ def excel_chart_text_xml(size: int, bold: bool = False, color: str = VN_BLACK) -
 def patch_excel_chart_text_defaults(workbook_bytes: bytes) -> bytes:
     source = BytesIO(workbook_bytes)
     patched = BytesIO()
-    chart_default_text = excel_chart_text_xml(1100)
+    chart_default_text = excel_chart_text_xml(EXCEL_CHART_AXIS_FONT_SIZE)
 
     with zipfile.ZipFile(source, "r") as source_zip:
         with zipfile.ZipFile(patched, "w", zipfile.ZIP_DEFLATED) as patched_zip:
@@ -4220,10 +4223,10 @@ def add_native_norm_excel_chart(
     chart.x_axis.majorGridlines = None
     chart.x_axis.majorTickMark = "none"
     chart.x_axis.minorTickMark = "none"
-    chart.x_axis.txPr = excel_chart_text(1100)
+    chart.x_axis.txPr = excel_chart_text(EXCEL_CHART_AXIS_FONT_SIZE, bold=True)
     chart.legend.position = "l"
     chart.legend.overlay = False
-    chart.legend.txPr = excel_chart_text(1100, bold=True)
+    chart.legend.txPr = excel_chart_text(EXCEL_CHART_LEGEND_FONT_SIZE, bold=True)
     chart.height = 9.4
     chart.width = max(22.0, min(32.0, 11.0 + chart_row_count * 2.25))
     chart.gapWidth = 60
@@ -4260,7 +4263,7 @@ def add_native_norm_excel_chart(
             showVal=True,
             numFmt="0%",
             dLblPos="outEnd",
-            txPr=excel_chart_text(1100, bold=True),
+            txPr=excel_chart_text(EXCEL_CHART_LABEL_FONT_SIZE, bold=True),
         )
         chart.series[0].dLbls = value_label_style
         chart.series[1].dLbls = value_label_style
