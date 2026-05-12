@@ -6,6 +6,7 @@
 - Changed on-page Norm table charts to show full wrapped response labels instead of ellipses.
 - Added chart legends for Control, Test, and Lift markers on Norm tables.
 - Colored lift bubble text green/red only for statistically significant positive/negative lift.
+- Normalized exported norm-chart fonts, widened chart canvases, and wrapped long category labels to prevent chart text collisions.
 - Moved exported norm-chart legends to the left, enlarged percent labels, thickened native Excel bars, and fixed double-minus lift values in editable chart source tables.
 - Added editable chart source ranges to each question sheet in the saved norms Excel export.
 - Improved saved norms Excel export formatting with sectioned All Norms tables, app-style headers, spacing, and full-width charts below each table.

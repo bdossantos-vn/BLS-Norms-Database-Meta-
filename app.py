@@ -22,7 +22,12 @@ from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.text import RichText
-from openpyxl.drawing.text import CharacterProperties, Paragraph, ParagraphProperties
+from openpyxl.drawing.text import (
+    CharacterProperties,
+    Font as DrawingFont,
+    Paragraph,
+    ParagraphProperties,
+)
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
@@ -4021,6 +4026,27 @@ def excel_lift_font_color(chart_row: dict) -> str:
     return "4C5361"
 
 
+def excel_chart_category_label(label: object, max_line_length: int = 18) -> str:
+    text = str(label or "").strip()
+    if len(text) <= max_line_length:
+        return text
+
+    lines: list[str] = []
+    current_line = ""
+    for word in text.split():
+        candidate = f"{current_line} {word}".strip()
+        if current_line and len(candidate) > max_line_length:
+            lines.append(current_line)
+            current_line = word
+        else:
+            current_line = candidate
+
+    if current_line:
+        lines.append(current_line)
+
+    return "\n".join(lines)
+
+
 def write_chart_source_table(
     worksheet,
     chart_rows: list[dict],
@@ -4051,8 +4077,9 @@ def write_chart_source_table(
     for row_offset, chart_row in enumerate(chart_rows, start=1):
         source_row = start_row + row_offset
         lift_points = round_percentage_points(chart_row["lift_points"])
+        chart_label = excel_chart_category_label(chart_row["label"])
         values = [
-            chart_row["label"],
+            chart_label,
             chart_row["control_points"] / 100,
             chart_row["test_points"] / 100,
             f"{lift_points:+d}",
@@ -4075,7 +4102,7 @@ def write_chart_source_table(
             if col_offset == 3:
                 cell.fill = PatternFill("solid", fgColor=VN_WHITE)
                 cell.font = Font(bold=True, color=excel_lift_font_color(chart_row))
-        worksheet.row_dimensions[source_row].height = 24
+        worksheet.row_dimensions[source_row].height = max(24, 15 * (chart_label.count("\n") + 1))
 
     source_widths = [28, 11, 11, 9, 16]
     for offset, width in enumerate(source_widths):
@@ -4090,6 +4117,7 @@ def excel_chart_text(size: int, bold: bool = False, color: str = VN_BLACK) -> Ri
                     defRPr=CharacterProperties(
                         sz=size,
                         b=bold,
+                        latin=DrawingFont(typeface="Arial"),
                         solidFill=color,
                     )
                 )
@@ -4120,11 +4148,12 @@ def add_native_norm_excel_chart(
     chart.x_axis.majorGridlines = None
     chart.x_axis.majorTickMark = "none"
     chart.x_axis.minorTickMark = "none"
-    chart.x_axis.txPr = excel_chart_text(950, bold=True)
+    chart.x_axis.txPr = excel_chart_text(1100, bold=True)
     chart.legend.position = "l"
+    chart.legend.overlay = False
     chart.legend.txPr = excel_chart_text(1100, bold=True)
-    chart.height = 8.3
-    chart.width = max(15.5, min(29.0, 7.0 + chart_row_count * 1.7))
+    chart.height = 9.4
+    chart.width = max(22.0, min(32.0, 11.0 + chart_row_count * 2.25))
     chart.gapWidth = 60
     chart.overlap = 0
 
@@ -4132,7 +4161,10 @@ def add_native_norm_excel_chart(
         max(row["control_points"], row["test_points"])
         for row in chart_rows
     )
-    chart.y_axis.scaling.max = max(1, math.ceil((max_points / 100) * 10) / 10)
+    chart.y_axis.scaling.max = min(
+        1,
+        max(0.12, math.ceil(((max_points + 10) / 100) * 10) / 10),
+    )
 
     data = Reference(
         worksheet,
@@ -4152,8 +4184,8 @@ def add_native_norm_excel_chart(
     chart.dataLabels = DataLabelList()
     chart.dataLabels.showVal = True
     chart.dataLabels.numFmt = "0%"
-    chart.dataLabels.dLblPos = "outEnd"
-    chart.dataLabels.txPr = excel_chart_text(1500, bold=True)
+    chart.dataLabels.dLblPos = "bestFit"
+    chart.dataLabels.txPr = excel_chart_text(1100, bold=True)
 
     if len(chart.series) >= 2:
         chart.series[0].graphicalProperties.solidFill = VN_CONTROL_GRAY
