@@ -6,6 +6,8 @@
 - Changed on-page Norm table charts to show full wrapped response labels instead of ellipses.
 - Added chart legends for Control, Test, and Lift markers on Norm tables.
 - Colored lift bubble text green/red only for statistically significant positive/negative lift.
+- Versioned the saved-norm Excel download button and embedded an export keyword so Streamlit cannot serve stale chart-export bytes.
+- Increased Google Sheets exported norm-chart x-axis labels to match metric point size and hid value-axis tick labels.
 - Changed Google Sheets norm-chart export back to two visible series only, with Control/Test legend entries and x-axis labels set below metric-label size.
 - Retuned Google Sheets exported norm-chart helper labels to 8.5pt while keeping metric labels at 11pt.
 - Removed the exported helper-series label header from chart legends and reduced helper category-label sizing.

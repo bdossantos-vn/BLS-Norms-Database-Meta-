@@ -85,6 +85,7 @@ NORM_DATASET_QUESTION_LABELS_SHEET = "Question Labels"
 NORM_DATASET_RESPONSE_LABELS_SHEET = "Response Labels"
 DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD = 0.8
 SIGNIFICANCE_ALPHA = 0.05
+NORM_EXPORT_VERSION = "google-sheets-axis-labels-v2"
 NO_LABEL_SHEET = "No labels sheet"
 VN_PINK = "FF005C"
 VN_CONTROL_GRAY = "C9D0D8"
@@ -4171,7 +4172,7 @@ def excel_chart_text_xml(size: int, bold: bool = False, color: str = VN_BLACK) -
 def patch_excel_chart_text_defaults(workbook_bytes: bytes) -> bytes:
     source = BytesIO(workbook_bytes)
     patched = BytesIO()
-    chart_default_text = excel_chart_text_xml(1000)
+    chart_default_text = excel_chart_text_xml(1100)
 
     with zipfile.ZipFile(source, "r") as source_zip:
         with zipfile.ZipFile(patched, "w", zipfile.ZIP_DEFLATED) as patched_zip:
@@ -4179,6 +4180,13 @@ def patch_excel_chart_text_defaults(workbook_bytes: bytes) -> bytes:
                 data = source_zip.read(item.filename)
                 if item.filename.startswith("xl/charts/chart") and item.filename.endswith(".xml"):
                     xml = data.decode("utf-8")
+                    xml = re.sub(
+                        r"(<valAx\b[^>]*>.*?<minorTickMark\b[^>]*/>)",
+                        r'\1<tickLblPos val="none"/>',
+                        xml,
+                        count=1,
+                        flags=re.DOTALL,
+                    )
                     if "</chartSpace>" in xml and "</chart><txPr>" not in xml:
                         xml = xml.replace(
                             "</chartSpace>",
@@ -4205,14 +4213,14 @@ def add_native_norm_excel_chart(
     chart = BarChart()
     chart.type = "col"
     chart.title = None
-    chart.y_axis.numFmt = "0%"
+    chart.y_axis.numFmt = ";;;"
     chart.y_axis.scaling.min = 0
     chart.y_axis.delete = True
     chart.y_axis.majorGridlines = None
     chart.x_axis.majorGridlines = None
     chart.x_axis.majorTickMark = "none"
     chart.x_axis.minorTickMark = "none"
-    chart.x_axis.txPr = excel_chart_text(1000)
+    chart.x_axis.txPr = excel_chart_text(1100)
     chart.legend.position = "l"
     chart.legend.overlay = False
     chart.legend.txPr = excel_chart_text(1100, bold=True)
@@ -4334,6 +4342,7 @@ def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
     }
 
     workbook = Workbook()
+    workbook.properties.keywords = f"BLS_NORMS_EXPORT_VERSION={NORM_EXPORT_VERSION}"
     write_all_norms_sheet(workbook, output_tables)
 
     for question, table in output_tables.items():
@@ -6419,11 +6428,13 @@ def render_saved_norm_tables_review() -> None:
             st.caption(f"Source variable: {', '.join(source_variables)}")
         render_norm_table_with_chart(metric_table.reset_index(drop=True))
 
+    export_bytes = norm_tables_to_excel(combined_tables)
     st.download_button(
         "Download saved norms Excel",
-        data=norm_tables_to_excel(combined_tables),
+        data=export_bytes,
         file_name="combined_saved_norm_tables.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"download_saved_norms_excel_{NORM_EXPORT_VERSION}",
     )
 
 
