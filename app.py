@@ -27,6 +27,7 @@ from openpyxl.drawing.text import (
     Font as DrawingFont,
     Paragraph,
     ParagraphProperties,
+    RichTextProperties,
 )
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -4110,17 +4111,22 @@ def write_chart_source_table(
 
 
 def excel_chart_text(size: int, bold: bool = False, color: str = VN_BLACK) -> RichText:
+    def character_properties() -> CharacterProperties:
+        return CharacterProperties(
+            sz=size,
+            b=bold,
+            latin=DrawingFont(typeface="Arial"),
+            solidFill=color,
+        )
+
     return RichText(
+        bodyPr=RichTextProperties(noAutofit=True),
         p=[
             Paragraph(
                 pPr=ParagraphProperties(
-                    defRPr=CharacterProperties(
-                        sz=size,
-                        b=bold,
-                        latin=DrawingFont(typeface="Arial"),
-                        solidFill=color,
-                    )
-                )
+                    defRPr=character_properties(),
+                ),
+                endParaRPr=character_properties(),
             )
         ]
     )
@@ -4147,7 +4153,7 @@ def add_native_norm_excel_chart(
     chart.x_axis.majorGridlines = None
     chart.x_axis.majorTickMark = "none"
     chart.x_axis.minorTickMark = "none"
-    chart.x_axis.txPr = excel_chart_text(500)
+    chart.x_axis.txPr = excel_chart_text(850)
     chart.legend.position = "l"
     chart.legend.overlay = False
     chart.legend.txPr = excel_chart_text(1100, bold=True)
