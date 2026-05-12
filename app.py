@@ -5313,11 +5313,6 @@ def delete_norm_dataset_from_database(record: dict) -> tuple[bool, str]:
 def render_persistence_status() -> None:
     config = github_autocommit_config()
     if config.get("enabled") and config.get("token") and config.get("repo"):
-        st.success(
-            "Permanent backup is configured: "
-            f"`{config['data_path']}` commits to `{config['repo']}` "
-            f"on `{config['branch']}`."
-        )
         return
 
     st.warning(
@@ -5346,32 +5341,26 @@ def norm_history_option_label(entry: dict) -> str:
     )
 
 
+def norm_history_manifest_path(entry: dict) -> Path:
+    version_id = normalize_answer(entry.get("version_id"))
+    return norm_history_version_dir(version_id) / "norm_settings" / "manifest.json"
+
+
+def norm_database_records_display(records: list[dict]) -> pd.DataFrame:
+    return (
+        pd.DataFrame(flatten_norm_database_record(record) for record in records)
+        .fillna(NOT_AVAILABLE)
+        .astype(str)
+    )
+
+
 def render_norm_history_controls() -> None:
     st.subheader("Version history")
-    st.caption(
-        "Restore points are created when datasets are saved, replaced, edited, "
-        "deleted, or restored."
-    )
 
     history_entries = load_norm_history_index()
     if not history_entries:
         st.info("No dataset restore points are available yet.")
         return
-
-    history_frame = pd.DataFrame(
-        [
-            {
-                "Version": entry.get("version_id", NOT_AVAILABLE),
-                "Created at": entry.get("created_at", NOT_AVAILABLE),
-                "Action": entry.get("action", NOT_AVAILABLE),
-                "Datasets": entry.get("dataset_count", 0),
-                "Dataset": entry.get("dataset_label", NOT_AVAILABLE),
-                "Note": entry.get("note", ""),
-            }
-            for entry in history_entries
-        ]
-    )
-    st.dataframe(history_frame, use_container_width=True, hide_index=True)
 
     selected_version = st.selectbox(
         "Version to restore",
@@ -5381,6 +5370,16 @@ def render_norm_history_controls() -> None:
     )
     if not selected_version:
         return
+
+    preview_manifest_path = norm_history_manifest_path(selected_version)
+    preview_records = read_manifest_records(preview_manifest_path)
+    st.markdown("**Saved datasets in selected version**")
+    if preview_records:
+        render_vn_table(norm_database_records_display(preview_records))
+    elif preview_manifest_path.exists():
+        st.info("This version has no saved datasets.")
+    else:
+        st.warning("This version is missing its saved-datasets manifest.")
 
     with st.expander("Restore saved datasets from selected version", expanded=False):
         st.warning(
@@ -5432,16 +5431,7 @@ def render_saved_datasets_tab() -> None:
         st.info("No saved norm datasets are available yet.")
         return
 
-    saved_record_display = (
-        pd.DataFrame(flatten_norm_database_record(record) for record in records)
-        .fillna(NOT_AVAILABLE)
-        .astype(str)
-    )
-    st.dataframe(
-        saved_record_display,
-        use_container_width=True,
-        hide_index=True,
-    )
+    render_vn_table(norm_database_records_display(records))
 
     selected_record = st.selectbox(
         "Dataset to edit",
@@ -5717,8 +5707,8 @@ def render_saved_norm_tables_review() -> None:
     )
 
 
-def render_norm_table(table: pd.DataFrame) -> None:
-    display_table = normalize_lift_output_table(table)
+def render_vn_table(table: pd.DataFrame) -> None:
+    display_table = table.copy()
     table_html = display_table.to_html(
         index=False,
         border=0,
@@ -5729,6 +5719,10 @@ def render_norm_table(table: pd.DataFrame) -> None:
         f'<div class="vn-norm-table-wrap">{table_html}</div>',
         unsafe_allow_html=True,
     )
+
+
+def render_norm_table(table: pd.DataFrame) -> None:
+    render_vn_table(normalize_lift_output_table(table))
 
 
 def main() -> None:

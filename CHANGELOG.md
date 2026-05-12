@@ -2,8 +2,10 @@
 
 ## Unreleased
 - Added saved-dataset version history with a baseline restore point plus restore points for saves, replacements, rule edits, deletions, and restores.
+- Changed saved-dataset and version-history preview tables to use the same white BLS table style as Norm tables.
+- Changed Version history to show a restore dropdown with a saved-datasets preview for the selected version instead of a full history grid.
 - Added saved-dataset removal controls with a safety restore point before deletion.
-- Added visible GitHub backup status so users know when saves are permanent across Streamlit Cloud restarts.
+- Added visible GitHub backup warnings when permanent cross-device storage is not configured.
 - Stabilized workbook uploads with an explicit Streamlit uploader key and session cache.
 - Improved saved norms restore from `uploaded_datasets/` when the working manifest or dataset workbooks are missing or partial after an app refresh/restart.
 - Changed saved Norm tables to recalculate one combined read across all filtered saved respondent-level datasets, summing counts and denominators before percentages, lift, and significance.
