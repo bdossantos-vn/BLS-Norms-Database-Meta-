@@ -6,6 +6,7 @@
 - Changed on-page Norm table charts to show full wrapped response labels instead of ellipses.
 - Added chart legends for Control, Test, and Lift markers on Norm tables.
 - Colored lift bubble text green/red only for statistically significant positive/negative lift.
+- Removed the exported helper-series label header from chart legends and reduced helper category-label sizing.
 - Replaced exported norm-chart category-axis labels with a hidden helper series and smaller data-label category names so Excel cannot inflate axis text.
 - Hid native exported norm-chart category axes so only the controlled helper labels render.
 - Added chart-wide text defaults to exported norm-chart XML so Excel has a fallback small label font.

@@ -4057,7 +4057,7 @@ def write_chart_source_table(
     start_row: int,
     start_col: int,
 ) -> None:
-    headers = ["Response option", "Control", "Test", "Label anchor", "Lift", "Significance"]
+    headers = ["Response option", "Control", "Test", "", "Lift", "Significance"]
     worksheet.cell(row=start_row - 2, column=start_col, value="Editable chart source").font = Font(
         bold=True,
         size=10,
@@ -4271,7 +4271,7 @@ def add_native_norm_excel_chart(
             showCatName=True,
             showVal=False,
             dLblPos="b",
-            txPr=excel_chart_text(850),
+            txPr=excel_chart_text(500),
         )
         chart.series[2].graphicalProperties.noFill = True
         chart.series[2].graphicalProperties.line.noFill = True
