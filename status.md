@@ -38,8 +38,10 @@
 - Norm tables page includes an explicit save-to-norms-database step that writes local dataset workbooks, a manifest, and an aggregate saved norms workbook.
 - Saved norms storage is anchored to the app directory by default and can be moved to shared persistent storage with `BLS_NORMS_DATA_DIR`.
 - Saved datasets are also backed up in `uploaded_datasets/` with separate folders for raw uploads, app-ready norm workbooks, and norm-setting backups.
+- Saved datasets create an initial baseline restore point, and saves, replacements, rule edits, deletes, and restores create version-history restore points under `uploaded_datasets/norm_history/`.
+- Saved datasets page can remove active datasets and restore previous saved-dataset states from version history.
 - If the working `norm_database/` is missing or partial on startup/refresh, the app restores missing data from `uploaded_datasets/`.
-- GitHub autocommit can push `uploaded_datasets/` after dataset saves and saved-rule updates when `[github_autocommit]` Streamlit secrets are configured.
+- GitHub autocommit can push `uploaded_datasets/` after dataset saves, edits, deletes, and restores when `[github_autocommit]` Streamlit secrets are configured. Without that external backup, Streamlit Cloud restarts can lose recent saved datasets.
 - Dataset saves and saved-rule edits use a write lock and atomic manifest writes for cross-session protection.
 - Duplicate uploads are detected by respondent ID overlap when an ID field is available; 80% or higher overlap is flagged and requires replacement rather than duplicate saving.
 - Upload and Saved datasets pages allow the respondent ID variable to be selected manually when auto-detection misses it.

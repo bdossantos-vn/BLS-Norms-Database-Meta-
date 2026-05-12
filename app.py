@@ -58,6 +58,8 @@ UPLOADED_DATASETS_DIR = APP_DIR / "uploaded_datasets"
 UPLOADED_RAW_DIR = UPLOADED_DATASETS_DIR / "raw_uploads"
 UPLOADED_NORM_WORKBOOKS_DIR = UPLOADED_DATASETS_DIR / "norm_workbooks"
 UPLOADED_SETTINGS_DIR = UPLOADED_DATASETS_DIR / "norm_settings"
+UPLOADED_HISTORY_DIR = UPLOADED_DATASETS_DIR / "norm_history"
+UPLOADED_HISTORY_INDEX_PATH = UPLOADED_HISTORY_DIR / "index.json"
 UPLOADED_MANIFEST_BACKUP_PATH = UPLOADED_SETTINGS_DIR / "manifest.json"
 UPLOADED_NORM_TABLES_BACKUP_PATH = UPLOADED_SETTINGS_DIR / "saved_norm_tables.xlsx"
 NORM_DATASET_RESPONDENT_SHEET = "Respondent Data"
@@ -178,7 +180,6 @@ NORM_FILTER_SESSION_PREFIX = "norm_filter_"
 UPLOAD_WORKBOOK_SESSION_KEY = "survey_excel_workbook_upload"
 ACTIVE_WORKBOOK_NAME_SESSION_KEY = "active_workbook_name"
 ACTIVE_WORKBOOK_BYTES_SESSION_KEY = "active_workbook_bytes"
-LOCAL_WORKBOOK_PATH_SESSION_KEY = "local_workbook_path"
 LIKERT_PATTERNS = [
     "strongly disagree",
     "disagree",
@@ -3628,6 +3629,7 @@ def ensure_uploaded_dataset_dirs() -> None:
         UPLOADED_RAW_DIR,
         UPLOADED_NORM_WORKBOOKS_DIR,
         UPLOADED_SETTINGS_DIR,
+        UPLOADED_HISTORY_DIR,
     ]:
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -3665,18 +3667,182 @@ def read_manifest_records(path: Path) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
-def merge_manifest_records(local_records: list[dict], backup_records: list[dict]) -> list[dict]:
-    merged_records: dict[str, dict] = {}
-    unnamed_records: list[dict] = []
+def norm_history_version_dir(version_id: str) -> Path:
+    return UPLOADED_HISTORY_DIR / safe_dataset_filename(version_id, "version")
 
-    for record in [*backup_records, *local_records]:
-        dataset_id = normalize_answer(record.get("dataset_id"))
-        if not dataset_id:
-            unnamed_records.append(record)
-            continue
-        merged_records[dataset_id] = record
 
-    return [*merged_records.values(), *unnamed_records]
+def load_norm_history_index() -> list[dict]:
+    if not UPLOADED_HISTORY_INDEX_PATH.exists():
+        return []
+    try:
+        data = json.loads(UPLOADED_HISTORY_INDEX_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    entries = data if isinstance(data, list) else []
+    return sorted(
+        [
+            entry
+            for entry in entries
+            if normalize_answer(entry.get("version_id"))
+        ],
+        key=lambda entry: normalize_answer(entry.get("created_at")) or "",
+        reverse=True,
+    )
+
+
+def save_norm_history_index(entries: list[dict]) -> None:
+    ensure_uploaded_dataset_dirs()
+    UPLOADED_HISTORY_INDEX_PATH.write_text(
+        json.dumps(entries, indent=2, sort_keys=True) + "\n"
+    )
+
+
+def copy_history_files(source_dir: Path, destination_dir: Path, pattern: str = "*") -> None:
+    if not source_dir.exists():
+        return
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for source_path in sorted(source_dir.glob(pattern)):
+        if source_path.is_file() and source_path.name != ".DS_Store":
+            shutil.copy2(source_path, destination_dir / source_path.name)
+
+
+def create_norm_database_history_snapshot(
+    action: str,
+    records: list[dict],
+    record: dict | None = None,
+    note: str = "",
+) -> dict | None:
+    ensure_uploaded_dataset_dirs()
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    action_slug = safe_dataset_filename(action, "snapshot")[:32]
+    version_base = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{action_slug}"
+    version_id = version_base
+    counter = 2
+    while norm_history_version_dir(version_id).exists():
+        version_id = f"{version_base}_{counter}"
+        counter += 1
+
+    snapshot_dir = norm_history_version_dir(version_id)
+    settings_dir = snapshot_dir / "norm_settings"
+    workbooks_dir = snapshot_dir / "norm_workbooks"
+    raw_dir = snapshot_dir / "raw_uploads"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    workbooks_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if UPLOADED_MANIFEST_BACKUP_PATH.exists():
+            shutil.copy2(UPLOADED_MANIFEST_BACKUP_PATH, settings_dir / "manifest.json")
+        else:
+            (settings_dir / "manifest.json").write_text(
+                json.dumps(records, indent=2, sort_keys=True) + "\n"
+            )
+        if UPLOADED_NORM_TABLES_BACKUP_PATH.exists():
+            shutil.copy2(
+                UPLOADED_NORM_TABLES_BACKUP_PATH,
+                settings_dir / "saved_norm_tables.xlsx",
+            )
+
+        copy_history_files(UPLOADED_NORM_WORKBOOKS_DIR, workbooks_dir, "*.xlsx")
+        copy_history_files(UPLOADED_SETTINGS_DIR, settings_dir, "*.json")
+        copy_history_files(UPLOADED_RAW_DIR, raw_dir)
+    except OSError:
+        return None
+
+    dataset_id = normalize_answer(record.get("dataset_id")) if record else ""
+    metadata = {
+        "version_id": version_id,
+        "created_at": created_at,
+        "action": action,
+        "note": note,
+        "dataset_id": dataset_id or NOT_AVAILABLE,
+        "dataset_label": saved_dataset_option_label(record) if record else NOT_AVAILABLE,
+        "dataset_count": len(records),
+    }
+    try:
+        (snapshot_dir / "metadata.json").write_text(
+            json.dumps(metadata, indent=2, sort_keys=True) + "\n"
+        )
+        save_norm_history_index([metadata, *load_norm_history_index()])
+    except OSError:
+        return None
+
+    return metadata
+
+
+def restore_norm_database_history_version(version_id: str) -> tuple[bool, str]:
+    safe_version_id = safe_dataset_filename(version_id, "")
+    if not safe_version_id:
+        return False, "Select a version to restore."
+
+    snapshot_dir = norm_history_version_dir(safe_version_id)
+    snapshot_manifest_path = snapshot_dir / "norm_settings" / "manifest.json"
+    if not snapshot_manifest_path.exists():
+        return False, "The selected version is missing its manifest."
+
+    restored_records = read_manifest_records(snapshot_manifest_path)
+    restored_record_ids = {
+        normalize_answer(record.get("dataset_id"))
+        for record in restored_records
+        if normalize_answer(record.get("dataset_id"))
+    }
+
+    try:
+        with norm_database_write_lock():
+            current_records = load_norm_database_manifest()
+            backup_norm_database_to_uploaded_datasets(current_records)
+            create_norm_database_history_snapshot(
+                "Before restore",
+                current_records,
+                note=f"Automatic safety snapshot before restoring {safe_version_id}.",
+            )
+
+            ensure_norm_database_dirs()
+            for dataset_path in NORM_DATABASE_DATASETS_DIR.glob("*.xlsx"):
+                if dataset_path.stem not in restored_record_ids:
+                    dataset_path.unlink(missing_ok=True)
+
+            missing_workbooks = []
+            for record in restored_records:
+                dataset_id = normalize_answer(record.get("dataset_id"))
+                if not dataset_id:
+                    continue
+                source_workbook_path = (
+                    snapshot_dir
+                    / "norm_workbooks"
+                    / f"{safe_dataset_filename(dataset_id, 'dataset')}.xlsx"
+                )
+                if not source_workbook_path.exists():
+                    missing_workbooks.append(dataset_id)
+                    continue
+                shutil.copy2(source_workbook_path, norm_database_dataset_path(dataset_id))
+
+            if missing_workbooks:
+                return (
+                    False,
+                    "The selected version is missing workbook files for: "
+                    + ", ".join(missing_workbooks),
+                )
+
+            save_norm_database_manifest(restored_records)
+            refresh_norm_database_workbook(restored_records)
+            backup_norm_database_to_uploaded_datasets(restored_records)
+            create_norm_database_history_snapshot(
+                "Restore version",
+                restored_records,
+                note=f"Restored version {safe_version_id}.",
+            )
+    except (OSError, TimeoutError) as exc:
+        return False, str(exc)
+
+    commit_ok, commit_message = github_autocommit_uploaded_datasets(
+        f"Restore BLS norms database version {safe_version_id}"
+    )
+    return True, save_message_with_github_status(
+        "Saved datasets restored from version history.",
+        commit_ok,
+        commit_message,
+    )
 
 
 def restore_norm_database_from_uploaded_datasets_if_needed() -> None:
@@ -3685,29 +3851,30 @@ def restore_norm_database_from_uploaded_datasets_if_needed() -> None:
 
     try:
         NORM_DATABASE_DATASETS_DIR.mkdir(parents=True, exist_ok=True)
-        local_records = read_manifest_records(NORM_DATABASE_MANIFEST_PATH)
         backup_records = read_manifest_records(UPLOADED_MANIFEST_BACKUP_PATH)
-        merged_records = merge_manifest_records(local_records, backup_records)
+        if not backup_records:
+            return
 
-        if merged_records != local_records:
-            temp_path = NORM_DATABASE_MANIFEST_PATH.with_suffix(".json.tmp")
-            temp_path.write_text(
-                json.dumps(merged_records, indent=2, sort_keys=True) + "\n"
-            )
-            temp_path.replace(NORM_DATABASE_MANIFEST_PATH)
-        elif not NORM_DATABASE_MANIFEST_PATH.exists():
+        if NORM_DATABASE_MANIFEST_PATH.exists():
+            records_to_restore = read_manifest_records(NORM_DATABASE_MANIFEST_PATH)
+        else:
             shutil.copy2(UPLOADED_MANIFEST_BACKUP_PATH, NORM_DATABASE_MANIFEST_PATH)
+            records_to_restore = backup_records
 
         if (
             UPLOADED_NORM_TABLES_BACKUP_PATH.exists()
             and not NORM_DATABASE_WORKBOOK_PATH.exists()
         ):
             shutil.copy2(UPLOADED_NORM_TABLES_BACKUP_PATH, NORM_DATABASE_WORKBOOK_PATH)
-        if UPLOADED_NORM_WORKBOOKS_DIR.exists():
-            for workbook_path in UPLOADED_NORM_WORKBOOKS_DIR.glob("*.xlsx"):
-                destination_path = NORM_DATABASE_DATASETS_DIR / workbook_path.name
-                if not destination_path.exists():
-                    shutil.copy2(workbook_path, destination_path)
+
+        for record in records_to_restore:
+            dataset_id = normalize_answer(record.get("dataset_id"))
+            if not dataset_id:
+                continue
+            source_path = uploaded_dataset_workbook_path(dataset_id)
+            destination_path = norm_database_dataset_path(dataset_id)
+            if source_path.exists() and not destination_path.exists():
+                shutil.copy2(source_path, destination_path)
     except OSError:
         return
 
@@ -3959,15 +4126,21 @@ def save_message_with_github_status(
     commit_ok: bool,
     commit_message: str,
 ) -> str:
-    quiet_messages = {
-        "GitHub autocommit is not configured.",
-        "GitHub autocommit found no file changes.",
-    }
-    if commit_message in quiet_messages:
+    if commit_message == "GitHub autocommit found no file changes.":
         return base_message
+    if commit_message == "GitHub autocommit is not configured.":
+        return (
+            f"{base_message} GitHub backup is not configured, so this may not "
+            "survive a Streamlit Cloud restart."
+        )
+    if commit_message == "GitHub autocommit needs a token and repo in Streamlit secrets.":
+        return (
+            f"{base_message} GitHub backup needs a token and repo in Streamlit "
+            "secrets before saves are permanent across restarts."
+        )
     if commit_ok:
         return f"{base_message} {commit_message}"
-    return f"{base_message} GitHub backup did not commit. Check Streamlit secrets."
+    return f"{base_message} {commit_message}"
 
 
 def migrate_legacy_norm_database_if_needed() -> None:
@@ -4723,6 +4896,15 @@ def save_norm_dataset_to_database(
             if existing_index is not None and not replace_existing:
                 return False, f"Possible duplicate upload: {duplicate_match_label(duplicate_match)}."
 
+            if existing_index is not None:
+                backup_norm_database_to_uploaded_datasets(records)
+                create_norm_database_history_snapshot(
+                    "Before replace dataset",
+                    records,
+                    records[existing_index],
+                    "Automatic safety snapshot before replacing a saved dataset.",
+                )
+
             saved_record = {
                 **record,
                 "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -4746,6 +4928,11 @@ def save_norm_dataset_to_database(
                 saved_record,
                 raw_workbook_bytes,
                 rules,
+            )
+            create_norm_database_history_snapshot(
+                "Replace dataset" if existing_index is not None else "Save dataset",
+                records,
+                saved_record,
             )
             saved_record_for_commit = saved_record
     except TimeoutError as exc:
@@ -4780,6 +4967,7 @@ def render_norm_database_save_controls(
         "Saves the full audited upload, not temporary table filters. "
         "Duplicate uploads are detected by respondent-ID overlap when available."
     )
+    render_persistence_status()
 
     saved_records = load_norm_database_manifest()
     duplicate_match = find_norm_database_duplicate_record(
@@ -4992,6 +5180,14 @@ def update_saved_norm_dataset_rules(
             if record_index is None:
                 return False, "Saved dataset record was not found in the manifest."
 
+            backup_norm_database_to_uploaded_datasets(records)
+            create_norm_database_history_snapshot(
+                "Before update rules",
+                records,
+                records[record_index],
+                "Automatic safety snapshot before updating saved dataset rules.",
+            )
+
             included_mappings = {
                 rule["Source variable"]: rule["Norm / benchmark"]
                 for rule in updated_rules.get("norm_rules", [])
@@ -5037,6 +5233,11 @@ def update_saved_norm_dataset_rules(
                 None,
                 updated_rules,
             )
+            create_norm_database_history_snapshot(
+                "Update rules",
+                records,
+                updated_record,
+            )
             updated_record_for_commit = updated_record
     except TimeoutError as exc:
         return False, str(exc)
@@ -5056,14 +5257,177 @@ def update_saved_norm_dataset_rules(
     )
 
 
+def delete_norm_dataset_from_database(record: dict) -> tuple[bool, str]:
+    dataset_id = normalize_answer(record.get("dataset_id"))
+    if not dataset_id:
+        return False, "Saved dataset record is missing a dataset ID."
+
+    deleted_record_for_commit = None
+    try:
+        with norm_database_write_lock():
+            records = load_norm_database_manifest()
+            record_index = next(
+                (
+                    index
+                    for index, saved_record in enumerate(records)
+                    if saved_record.get("dataset_id") == dataset_id
+                ),
+                None,
+            )
+            if record_index is None:
+                return False, "Saved dataset record was not found in the manifest."
+
+            backup_norm_database_to_uploaded_datasets(records)
+            create_norm_database_history_snapshot(
+                "Before delete dataset",
+                records,
+                records[record_index],
+                "Automatic safety snapshot before deleting a saved dataset.",
+            )
+
+            deleted_record = records.pop(record_index)
+            norm_database_dataset_path(dataset_id).unlink(missing_ok=True)
+            save_norm_database_manifest(records)
+            refresh_norm_database_workbook(records)
+            backup_norm_database_to_uploaded_datasets(records)
+            create_norm_database_history_snapshot(
+                "Delete dataset",
+                records,
+                deleted_record,
+                "Saved dataset removed from the active manifest.",
+            )
+            deleted_record_for_commit = deleted_record
+    except (OSError, TimeoutError) as exc:
+        return False, str(exc)
+
+    commit_ok, commit_message = github_autocommit_uploaded_datasets(
+        f"Delete BLS norms dataset {dataset_id}"
+    )
+    return True, save_message_with_github_status(
+        "Saved dataset removed. A version-history restore point was created.",
+        commit_ok,
+        commit_message,
+    )
+
+
+def render_persistence_status() -> None:
+    config = github_autocommit_config()
+    if config.get("enabled") and config.get("token") and config.get("repo"):
+        st.success(
+            "Permanent backup is configured: "
+            f"`{config['data_path']}` commits to `{config['repo']}` "
+            f"on `{config['branch']}`."
+        )
+        return
+
+    st.warning(
+        "Permanent cross-device storage is not configured. Saved datasets can "
+        "disappear when Streamlit Cloud restarts unless `[github_autocommit]` "
+        "secrets are set."
+    )
+    with st.expander("GitHub backup secrets needed", expanded=False):
+        st.code(
+            """[github_autocommit]
+enabled = true
+repo = "OWNER/REPO"
+branch = "main"
+token = "github_pat_or_classic_token"
+data_path = "uploaded_datasets"
+""",
+            language="toml",
+        )
+
+
+def norm_history_option_label(entry: dict) -> str:
+    return (
+        f"{entry.get('created_at', NOT_AVAILABLE)} | "
+        f"{entry.get('action', NOT_AVAILABLE)} | "
+        f"{entry.get('dataset_count', 0)} datasets"
+    )
+
+
+def render_norm_history_controls() -> None:
+    st.subheader("Version history")
+    st.caption(
+        "Restore points are created when datasets are saved, replaced, edited, "
+        "deleted, or restored."
+    )
+
+    history_entries = load_norm_history_index()
+    if not history_entries:
+        st.info("No dataset restore points are available yet.")
+        return
+
+    history_frame = pd.DataFrame(
+        [
+            {
+                "Version": entry.get("version_id", NOT_AVAILABLE),
+                "Created at": entry.get("created_at", NOT_AVAILABLE),
+                "Action": entry.get("action", NOT_AVAILABLE),
+                "Datasets": entry.get("dataset_count", 0),
+                "Dataset": entry.get("dataset_label", NOT_AVAILABLE),
+                "Note": entry.get("note", ""),
+            }
+            for entry in history_entries
+        ]
+    )
+    st.dataframe(history_frame, use_container_width=True, hide_index=True)
+
+    selected_version = st.selectbox(
+        "Version to restore",
+        history_entries,
+        format_func=norm_history_option_label,
+        key="norm_history_version_to_restore",
+    )
+    if not selected_version:
+        return
+
+    with st.expander("Restore saved datasets from selected version", expanded=False):
+        st.warning(
+            "Restoring replaces the active saved-datasets manifest with the selected "
+            "version. A safety snapshot of the current state is created first."
+        )
+        confirm_restore = st.checkbox(
+            "I understand this will replace the active saved datasets",
+            key=f"confirm_restore_{selected_version.get('version_id')}",
+        )
+        if st.button(
+            "Restore selected version",
+            disabled=not confirm_restore,
+            use_container_width=True,
+        ):
+            success, message = restore_norm_database_history_version(
+                selected_version.get("version_id", "")
+            )
+            if success:
+                st.success(message)
+                st.rerun()
+            else:
+                st.error(message)
+
+
+def ensure_norm_history_baseline(records: list[dict]) -> None:
+    if not records or load_norm_history_index():
+        return
+    backup_norm_database_to_uploaded_datasets(records)
+    create_norm_database_history_snapshot(
+        "Baseline",
+        records,
+        note="Initial restore point for saved datasets that existed before version history.",
+    )
+
+
 def render_saved_datasets_tab() -> None:
     st.subheader("Saved datasets")
     st.write(
         "Review saved norm datasets and edit their saved calculation rules when "
         "standards change."
     )
-
     records = load_norm_database_manifest()
+    ensure_norm_history_baseline(records)
+    render_persistence_status()
+    render_norm_history_controls()
+
     if not records:
         st.info("No saved norm datasets are available yet.")
         return
@@ -5086,6 +5450,27 @@ def render_saved_datasets_tab() -> None:
     )
     if not selected_record:
         return
+
+    with st.expander("Remove selected saved dataset", expanded=False):
+        st.warning(
+            "Removing a dataset takes it out of the active saved norms database. "
+            "A version-history restore point is created before deletion."
+        )
+        confirm_delete = st.checkbox(
+            "I understand this will remove the selected saved dataset",
+            key=f"delete_dataset_confirm_{selected_record.get('dataset_id')}",
+        )
+        if st.button(
+            "Remove selected dataset",
+            disabled=not confirm_delete,
+            use_container_width=True,
+        ):
+            success, message = delete_norm_dataset_from_database(selected_record)
+            if success:
+                st.success(message)
+                st.rerun()
+            else:
+                st.error(message)
 
     dataset_path = norm_database_dataset_path(selected_record.get("dataset_id", ""))
     if not dataset_path.exists():
