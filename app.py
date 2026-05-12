@@ -4271,7 +4271,7 @@ def add_native_norm_excel_chart(
             showCatName=True,
             showVal=False,
             dLblPos="b",
-            txPr=excel_chart_text(500),
+            txPr=excel_chart_text(850),
         )
         chart.series[2].graphicalProperties.noFill = True
         chart.series[2].graphicalProperties.line.noFill = True
