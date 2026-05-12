@@ -6,6 +6,8 @@
 - Changed on-page Norm table charts to show full wrapped response labels instead of ellipses.
 - Added chart legends for Control, Test, and Lift markers on Norm tables.
 - Colored lift bubble text green/red only for statistically significant positive/negative lift.
+- Added chart-wide text defaults to exported norm-chart XML so Excel has a fallback small label font.
+- Added run-level font properties to exported norm charts so Excel applies chart label sizing during render.
 - Added no-autofit chart text properties so Excel preserves exported norm-chart font sizing.
 - Reduced exported norm-chart axis labels further and returned percent labels above bars to better match the app chart hierarchy.
 - Removed the built-in Excel chart style from exported norm charts so explicit chart label font sizes are preserved.

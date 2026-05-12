@@ -9,6 +9,7 @@ import shutil
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from contextlib import contextmanager
 from difflib import SequenceMatcher
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from openpyxl.drawing.text import (
     Font as DrawingFont,
     Paragraph,
     ParagraphProperties,
+    RegularTextRun,
     RichTextProperties,
 )
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -4126,10 +4128,67 @@ def excel_chart_text(size: int, bold: bool = False, color: str = VN_BLACK) -> Ri
                 pPr=ParagraphProperties(
                     defRPr=character_properties(),
                 ),
+                r=[RegularTextRun(rPr=character_properties(), t="")],
                 endParaRPr=character_properties(),
             )
         ]
     )
+
+
+def excel_chart_text_xml(size: int, bold: bool = False, color: str = VN_BLACK) -> str:
+    bold_value = "1" if bold else "0"
+    return (
+        "<txPr>"
+        '<a:bodyPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        "<a:noAutofit/>"
+        "</a:bodyPr>"
+        '<a:p xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        "<a:pPr>"
+        f'<a:defRPr sz="{size}" b="{bold_value}">'
+        "<a:solidFill>"
+        f'<a:srgbClr val="{color}"/>'
+        "</a:solidFill>"
+        '<a:latin typeface="Arial"/>'
+        "</a:defRPr>"
+        "</a:pPr>"
+        f'<a:r><a:rPr sz="{size}" b="{bold_value}">'
+        "<a:solidFill>"
+        f'<a:srgbClr val="{color}"/>'
+        "</a:solidFill>"
+        '<a:latin typeface="Arial"/>'
+        "</a:rPr><a:t></a:t></a:r>"
+        f'<a:endParaRPr sz="{size}" b="{bold_value}">'
+        "<a:solidFill>"
+        f'<a:srgbClr val="{color}"/>'
+        "</a:solidFill>"
+        '<a:latin typeface="Arial"/>'
+        "</a:endParaRPr>"
+        "</a:p>"
+        "</txPr>"
+    )
+
+
+def patch_excel_chart_text_defaults(workbook_bytes: bytes) -> bytes:
+    source = BytesIO(workbook_bytes)
+    patched = BytesIO()
+    chart_default_text = excel_chart_text_xml(850)
+
+    with zipfile.ZipFile(source, "r") as source_zip:
+        with zipfile.ZipFile(patched, "w", zipfile.ZIP_DEFLATED) as patched_zip:
+            for item in source_zip.infolist():
+                data = source_zip.read(item.filename)
+                if item.filename.startswith("xl/charts/chart") and item.filename.endswith(".xml"):
+                    xml = data.decode("utf-8")
+                    if "</chartSpace>" in xml and "</chart><txPr>" not in xml:
+                        xml = xml.replace(
+                            "</chartSpace>",
+                            f"{chart_default_text}</chartSpace>",
+                            1,
+                        )
+                    data = xml.encode("utf-8")
+                patched_zip.writestr(item, data)
+
+    return patched.getvalue()
 
 
 def add_native_norm_excel_chart(
@@ -4278,7 +4337,7 @@ def norm_tables_to_excel(tables: dict[str, pd.DataFrame]) -> bytes:
         write_question_sheet(workbook, sheet_name, str(question), table)
 
     workbook.save(output)
-    return output.getvalue()
+    return patch_excel_chart_text_defaults(output.getvalue())
 
 
 def ensure_uploaded_dataset_dirs() -> None:
