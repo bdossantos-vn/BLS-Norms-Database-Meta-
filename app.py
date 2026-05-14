@@ -3094,6 +3094,7 @@ def summarize_group_response_choices(choices: list[str], max_choices: int = 8) -
 def database_variable_name_options(
     saved_mappings: dict[str, str],
     prior_rules: list[dict] | None = None,
+    extra_options: list[str] | None = None,
 ) -> list[str]:
     options: list[str] = []
 
@@ -3118,20 +3119,68 @@ def database_variable_name_options(
         add_option(prior_rule.get("Source variable"))
         add_option(prior_rule.get("Norm / benchmark"))
 
+    for option in extra_options or []:
+        add_option(option)
+
     return sorted(options, key=lambda value: normalize_sort_text(value))
+
+
+def saved_rule_question_label_lookup(saved_rules: dict | None) -> dict[str, dict]:
+    if not saved_rules:
+        return {}
+
+    question_labels = saved_rules.get("question_labels", {})
+    lookup: dict[str, dict] = {}
+    for rule in saved_rules.get("norm_rules", []):
+        if not norm_rule_is_included(rule):
+            continue
+        source_variable = normalize_answer(rule.get("Source variable"))
+        if not source_variable:
+            continue
+
+        question_label = normalize_answer(question_labels.get(source_variable)) or source_variable
+        label_key = normalize_alias_key(question_label)
+        if label_key:
+            lookup.setdefault(label_key, rule)
+
+    return lookup
+
+
+def saved_group_variable_defaults(
+    candidates: list[ColumnGroupCandidate],
+    saved_rules: dict | None,
+) -> dict[str, str]:
+    lookup = saved_rule_question_label_lookup(saved_rules)
+    defaults: dict[str, str] = {}
+
+    for candidate in candidates:
+        rule = lookup.get(normalize_alias_key(candidate.question_text))
+        if not rule:
+            continue
+
+        source_variable = normalize_answer(rule.get("Source variable"))
+        if source_variable:
+            defaults[candidate.group_id] = source_variable
+
+    return defaults
 
 
 def column_group_review_frame(
     candidates: list[ColumnGroupCandidate],
     database_variable_options: list[str] | None = None,
+    saved_group_variables: dict[str, str] | None = None,
 ) -> pd.DataFrame:
+    saved_group_variables = saved_group_variables or {}
     frame = pd.DataFrame(
         [
             {
                 "_group_id": candidate.group_id,
                 "Combine": True,
                 "Grouped Variable": candidate.variable_name,
-                "Database Variable": USE_GROUPED_VARIABLE_NAME_OPTION,
+                "Database Variable": saved_group_variables.get(
+                    candidate.group_id,
+                    USE_GROUPED_VARIABLE_NAME_OPTION,
+                ),
                 "Question Text": candidate.question_text,
                 "Question Type": "Multi-Select",
                 "Source Columns": len(candidate.source_columns),
@@ -3350,11 +3399,13 @@ def render_column_group_review(
     delimiter: str,
     key: str,
     database_variable_options: list[str] | None = None,
+    saved_rules: dict | None = None,
 ) -> tuple[pd.DataFrame, dict[str, str], dict[str, dict[str, str]], dict[str, str]]:
     candidates = detect_column_group_candidates(df, question_labels)
     if not candidates:
         return df, question_labels, response_labels, {}
     database_variable_options = database_variable_options or []
+    saved_group_variables = saved_group_variable_defaults(candidates, saved_rules)
     database_variable_select_options = [
         USE_GROUPED_VARIABLE_NAME_OPTION,
         *database_variable_options,
@@ -3367,7 +3418,11 @@ def render_column_group_review(
         "Use the database-variable dropdown when a saved variable name should be reused."
     )
     edited_groups = st.data_editor(
-        column_group_review_frame(candidates, database_variable_options),
+        column_group_review_frame(
+            candidates,
+            database_variable_options,
+            saved_group_variables,
+        ),
         key=key,
         use_container_width=True,
         hide_index=True,
@@ -4944,7 +4999,9 @@ def render_saved_norm_filter_controls(saved_records: list[dict]) -> dict[str, li
 def prompt_for_missing_project_metadata(
     df: pd.DataFrame,
     question_labels: dict[str, str],
+    metadata_defaults: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, str]]:
+    metadata_defaults = metadata_defaults or {}
     lookup = project_metadata_column_lookup(df.columns)
     missing_variables = [
         variable
@@ -4987,6 +5044,11 @@ def prompt_for_missing_project_metadata(
                 variable,
                 key=f"project_metadata_value_{variable}",
                 placeholder=f"Enter {variable}",
+                value=(
+                    ""
+                    if metadata_defaults.get(variable) in {None, NOT_AVAILABLE}
+                    else normalize_answer(metadata_defaults.get(variable)) or ""
+                ),
             )
             normalized_value = normalize_answer(value)
             if normalized_value:
@@ -6770,6 +6832,59 @@ def read_norm_dataset_rules(dataset_path: Path) -> dict | None:
     }
 
 
+def saved_rules_for_duplicate_match(match: dict | None) -> dict | None:
+    record = (match or {}).get("record", {})
+    dataset_id = normalize_answer(record.get("dataset_id"))
+    if not dataset_id:
+        return None
+
+    dataset_path = norm_database_dataset_path(dataset_id)
+    if not dataset_path.exists():
+        return None
+
+    return read_norm_dataset_rules(dataset_path)
+
+
+def norm_rule_settings_from_rules(rules: dict | None) -> tuple[
+    dict[str, str],
+    dict[str, str],
+    dict[str, list[str]],
+    dict[str, str],
+    dict[str, dict],
+]:
+    if not rules:
+        return {}, {}, {}, {}, {}
+
+    norm_mappings: dict[str, str] = {}
+    denominator_settings: dict[str, str] = {}
+    box_score_settings: dict[str, list[str]] = {}
+    question_type_settings: dict[str, str] = {}
+
+    for rule in rules.get("norm_rules", []):
+        source_variable = normalize_answer(rule.get("Source variable"))
+        if not source_variable:
+            continue
+
+        mapped_norm = normalize_answer(rule.get("Norm / benchmark")) or source_variable
+        include_rule = norm_rule_is_included(rule) and mapped_norm != NA_NORM_OPTION
+        norm_mappings[source_variable] = mapped_norm if include_rule else NA_NORM_OPTION
+
+        denominator = normalize_answer(rule.get("Denominator"))
+        denominator_settings[source_variable] = (
+            denominator if denominator in DENOMINATOR_OPTIONS else DEFAULT_DENOMINATOR
+        )
+        box_score_settings[source_variable] = normalize_box_score_list(rule.get("Box scores"))
+        question_type_settings[source_variable] = normalize_question_type(rule.get("Question Type"))
+
+    return (
+        norm_mappings,
+        denominator_settings,
+        box_score_settings,
+        question_type_settings,
+        normalize_response_choice_settings(rules.get("response_choice_settings", {})),
+    )
+
+
 def write_norm_dataset_workbook(
     record: dict,
     tables: dict[str, pd.DataFrame],
@@ -7799,6 +7914,13 @@ def main() -> None:
     question_type_settings: dict[str, str] = {}
     response_choice_settings: dict[str, dict] = {}
     structure_question_type_settings: dict[str, str] = {}
+    duplicate_norm_mappings: dict[str, str] = {}
+    duplicate_denominator_settings: dict[str, str] = {}
+    duplicate_box_score_settings: dict[str, list[str]] = {}
+    duplicate_question_type_settings: dict[str, str] = {}
+    duplicate_response_choice_settings: dict[str, dict] = {}
+    duplicate_saved_record: dict | None = None
+    duplicate_saved_rules: dict | None = None
     audit_consistency_issues: list[dict] = []
     audit_consistency_confirmed = True
     respondent_id_column = None
@@ -7896,9 +8018,45 @@ def main() -> None:
                     data_sheet,
                 )
                 question_labels.update(label_question_labels)
+
+                upload_duplicate_probe = norm_database_duplicate_probe_for_data(
+                    workbook_bytes,
+                    uploaded_file_name,
+                    data_sheet,
+                    data,
+                    question_labels,
+                    respondent_id_column_for_data(data, question_labels),
+                )
+                upload_duplicate_match = find_norm_database_duplicate_record(
+                    load_norm_database_manifest(),
+                    upload_duplicate_probe,
+                    DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
+                )
+                if upload_duplicate_match:
+                    duplicate_saved_record = upload_duplicate_match.get("record")
+                    duplicate_saved_rules = saved_rules_for_duplicate_match(upload_duplicate_match)
+                    (
+                        duplicate_norm_mappings,
+                        duplicate_denominator_settings,
+                        duplicate_box_score_settings,
+                        duplicate_question_type_settings,
+                        duplicate_response_choice_settings,
+                    ) = norm_rule_settings_from_rules(duplicate_saved_rules)
+                    st.warning(
+                        "Dataset already added to norms. Saved setup has been loaded "
+                        "as defaults for this upload."
+                    )
+                    st.caption(duplicate_match_label(upload_duplicate_match))
+
+                duplicate_rule_options = [
+                    normalize_answer(rule.get("Source variable"))
+                    for rule in (duplicate_saved_rules or {}).get("norm_rules", [])
+                    if normalize_answer(rule.get("Source variable"))
+                ]
                 database_variable_options = database_variable_name_options(
                     saved_norm_mappings,
                     prior_norm_rules,
+                    duplicate_rule_options,
                 )
                 (
                     data,
@@ -7912,12 +8070,19 @@ def main() -> None:
                     delimiter,
                     key=f"column_group_review_{uploaded_file_name}_{data_sheet}",
                     database_variable_options=database_variable_options,
+                    saved_rules=duplicate_saved_rules,
                 )
                 st.subheader("Respondent ID setup")
+                saved_respondent_id_column = normalize_answer(
+                    (duplicate_saved_record or {}).get("respondent_id_column")
+                )
+                if saved_respondent_id_column == NOT_AVAILABLE:
+                    saved_respondent_id_column = None
                 respondent_id_column = render_respondent_id_selector(
                     data,
                     question_labels,
                     key=f"upload_respondent_id_{uploaded_file_name}_{data_sheet}",
+                    current_column=saved_respondent_id_column,
                 )
                 upload_duplicate_probe = norm_database_duplicate_probe_for_data(
                     workbook_bytes,
@@ -7932,20 +8097,42 @@ def main() -> None:
                     upload_duplicate_probe,
                     DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD,
                 )
-                if upload_duplicate_match:
-                    st.warning("Dataset already added to norms.")
+                if upload_duplicate_match and duplicate_saved_rules is None:
+                    duplicate_saved_record = upload_duplicate_match.get("record")
+                    duplicate_saved_rules = saved_rules_for_duplicate_match(upload_duplicate_match)
+                    (
+                        duplicate_norm_mappings,
+                        duplicate_denominator_settings,
+                        duplicate_box_score_settings,
+                        duplicate_question_type_settings,
+                        duplicate_response_choice_settings,
+                    ) = norm_rule_settings_from_rules(duplicate_saved_rules)
+                    st.warning(
+                        "Dataset already added to norms. Saved setup has been loaded "
+                        "as defaults for this upload."
+                    )
+                    st.caption(duplicate_match_label(upload_duplicate_match))
 
                 data, question_labels = prompt_for_missing_project_metadata(
                     data,
                     question_labels,
+                    (duplicate_saved_record or {}).get("metadata_values", {}),
                 )
 
                 st.subheader("Sample setup")
                 columns = list(data.columns)
+                saved_group_column = normalize_answer(
+                    (duplicate_saved_rules or {}).get("group_column")
+                )
+                group_index = (
+                    columns.index(saved_group_column)
+                    if saved_group_column in columns
+                    else default_group_column_index(columns)
+                )
                 group_column = st.selectbox(
                     "Control/test group column",
                     columns,
-                    index=default_group_column_index(columns),
+                    index=group_index,
                 )
                 candidate_questions = [
                     column
@@ -7955,6 +8142,7 @@ def main() -> None:
                 audit_signature_payload = {
                     "questions": [str(column) for column in candidate_questions],
                     "structure_question_types": structure_question_type_settings,
+                    "duplicate_dataset_id": (duplicate_saved_record or {}).get("dataset_id"),
                 }
                 audit_signature = hashlib.sha1(
                     json.dumps(audit_signature_payload, sort_keys=True).encode("utf-8")
@@ -7978,21 +8166,37 @@ def main() -> None:
                         "The selected group column needs at least two non-empty labels."
                     )
                 else:
+                    saved_control_label = normalize_answer(
+                        (duplicate_saved_rules or {}).get("control_label")
+                    )
+                    saved_test_label = normalize_answer(
+                        (duplicate_saved_rules or {}).get("test_label")
+                    )
+                    control_index = (
+                        group_labels.index(saved_control_label)
+                        if saved_control_label in group_labels
+                        else 0
+                    )
+                    test_index = (
+                        group_labels.index(saved_test_label)
+                        if saved_test_label in group_labels
+                        else (1 if len(group_labels) > 1 else 0)
+                    )
                     control_col, test_col = st.columns(2)
                     control_label = control_col.selectbox(
                         "Control label",
                         group_labels,
+                        index=control_index,
                         format_func=lambda value: display_response_label(
                             group_column,
                             value,
                             response_labels,
                         ),
                     )
-                    default_test_index = 1 if len(group_labels) > 1 else 0
                     test_label = test_col.selectbox(
                         "Test label",
                         group_labels,
-                        index=default_test_index,
+                        index=test_index,
                         format_func=lambda value: display_response_label(
                             group_column,
                             value,
@@ -8012,9 +8216,17 @@ def main() -> None:
                     "or select T2B/T3B/B2B/B3B to add top/bottom-box norm rows."
                 )
 
+                upload_saved_norm_mappings = {
+                    **saved_norm_mappings,
+                    **duplicate_norm_mappings,
+                }
+                upload_saved_response_choice_settings = merge_response_choice_settings(
+                    saved_response_choice_settings,
+                    duplicate_response_choice_settings,
+                )
                 norm_catalog = build_norm_catalog(
                     candidate_questions,
-                    saved_norm_mappings,
+                    upload_saved_norm_mappings,
                     prior_norm_rules,
                 )
                 norm_options = [NA_NORM_OPTION, *norm_catalog]
@@ -8028,11 +8240,13 @@ def main() -> None:
                 )
                 effective_box_score_settings = {
                     **saved_box_score_settings,
+                    **duplicate_box_score_settings,
                     **pending_box_score_settings,
                 }
                 effective_question_type_settings = {
                     **saved_question_type_settings,
                     **structure_question_type_settings,
+                    **duplicate_question_type_settings,
                     **pending_question_type_settings,
                 }
                 audit_frame = build_norm_audit_frame(
@@ -8040,7 +8254,7 @@ def main() -> None:
                     candidate_questions,
                     question_labels,
                     response_labels,
-                    saved_norm_mappings,
+                    upload_saved_norm_mappings,
                     effective_box_score_settings,
                     effective_question_type_settings,
                     saved_na_alias_settings,
@@ -8174,7 +8388,7 @@ def main() -> None:
                         question_type_settings,
                         split_multi_select,
                         delimiter,
-                        saved_response_choice_settings,
+                        upload_saved_response_choice_settings,
                         load_norm_database_manifest(),
                         audit_signature,
                     )
@@ -8267,7 +8481,10 @@ def main() -> None:
             )
 
             for question in norm_questions:
-                current_setting = settings.get(question, DEFAULT_DENOMINATOR)
+                current_setting = duplicate_denominator_settings.get(
+                    question,
+                    settings.get(question, DEFAULT_DENOMINATOR),
+                )
                 if current_setting not in DENOMINATOR_OPTIONS:
                     current_setting = DEFAULT_DENOMINATOR
 
@@ -8299,7 +8516,10 @@ def main() -> None:
             effective_denominator_settings = {
                 question: selected_denominators.get(
                     question,
-                    settings.get(question, DEFAULT_DENOMINATOR),
+                    duplicate_denominator_settings.get(
+                        question,
+                        settings.get(question, DEFAULT_DENOMINATOR),
+                    ),
                 )
                 for question in norm_questions
             }

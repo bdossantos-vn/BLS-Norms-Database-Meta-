@@ -26,6 +26,7 @@ streamlit run app.py
 - The audit also checks saved dataset rules by source variable, question label, and norm/benchmark label so prior T2B/T3B/B2B/B3B choices are reused for matching questions.
 - If a new audit selection conflicts with prior saved norm rules, the app flags the mismatch and requires confirmation before saving the audit mapping or saving the dataset.
 - Confirmed standards changes should be followed by updating previous saved datasets so each metric is measured consistently.
+- When an uploaded workbook matches an already saved dataset, the upload audit loads the saved setup as defaults so a correction can be made without rebuilding the entire audit.
 - Audit buttons can apply T2B, T3B, B2B, B3B, or clear box selections across all non-NA Scale / Likert questions.
 - The default data layout is the BLS / Smart Tables layout: row 1 contains variable names, row 2 contains question labels, and following rows contain respondent-level data.
 - During upload, the app reviews file structure for repeated question text with `- response choice` suffixes and can combine those option columns into one audited question with a selected question type.
