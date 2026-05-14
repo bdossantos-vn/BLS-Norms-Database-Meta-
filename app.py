@@ -44,6 +44,8 @@ NOT_AVAILABLE = "Not available"
 NOT_TESTED = "Not tested"
 NA_NORM_OPTION = "NA"
 NO_RESPONDENT_ID_OPTION = "No respondent ID / not available"
+TYPE_METADATA_VALUE_OPTION = "Type a value"
+USE_GROUPED_VARIABLE_NAME_OPTION = "Use grouped variable name"
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_PATH = APP_DIR / "denominator_settings.json"
 NORM_MAPPING_PATH = APP_DIR / "norm_mapping_settings.json"
@@ -361,6 +363,16 @@ class RespondentSheet:
     metadata_rows_removed: int = 0
     metadata_columns_default_na: int = 0
     metadata_columns: list[str] | None = None
+
+
+@dataclass
+class ColumnGroupCandidate:
+    group_id: str
+    question_text: str
+    variable_name: str
+    source_columns: list[str]
+    response_choices: list[str]
+    source_choices: dict[str, str]
 
 
 def logo_base64() -> str:
@@ -2399,6 +2411,453 @@ def identify_metadata_columns(columns) -> list[str]:
     return [column for column in columns if is_default_na_metadata_variable(column)]
 
 
+def split_question_label_response_choice(label) -> tuple[str | None, str | None]:
+    normalized_label = normalize_answer(label)
+    if not normalized_label:
+        return None, None
+
+    match = re.match(r"^(.+)\s+-\s+(.+)$", normalized_label, flags=re.S)
+    if not match:
+        return None, None
+
+    question_text = normalize_answer(match.group(1))
+    response_choice = normalize_answer(match.group(2))
+    if not question_text or not response_choice:
+        return None, None
+    if normalize_alias_key(question_text) == normalize_alias_key(response_choice):
+        return None, None
+
+    return question_text, response_choice
+
+
+def make_unique_name(base_name: str, used_names: set[str]) -> str:
+    normalized_base = normalize_answer(base_name) or "Grouped question"
+    candidate = normalized_base
+    suffix = 2
+    while candidate in used_names:
+        candidate = f"{normalized_base}_{suffix}"
+        suffix += 1
+    used_names.add(candidate)
+    return candidate
+
+
+def suggested_group_variable_name(
+    source_columns: list[str],
+    question_text: str,
+    used_names: set[str],
+) -> str:
+    stems = [
+        re.sub(r"[_\s-]*\d+$", "", normalize_answer(column) or "").strip(" _-")
+        for column in source_columns
+    ]
+    stems = [stem for stem in stems if stem]
+    if stems:
+        common_prefix = os.path.commonprefix(stems).strip(" _-")
+        if len(normalize_alias_key(common_prefix)) >= 3:
+            return make_unique_name(common_prefix, used_names)
+
+        first_stem = stems[0]
+        if len(normalize_alias_key(first_stem)) >= 3:
+            return make_unique_name(first_stem, used_names)
+
+    fallback = re.sub(r"\s+", " ", question_text).strip()[:60]
+    return make_unique_name(fallback, used_names)
+
+
+def detect_column_group_candidates(
+    df: pd.DataFrame,
+    question_labels: dict[str, str],
+) -> list[ColumnGroupCandidate]:
+    grouped_columns: dict[str, dict] = {}
+    used_group_names = set(str(column) for column in df.columns)
+
+    for column in df.columns:
+        if is_default_na_metadata_variable(column) or is_project_metadata_variable(column):
+            continue
+
+        question_text, response_choice = split_question_label_response_choice(
+            display_question_label(column, question_labels)
+        )
+        if not question_text or not response_choice:
+            continue
+
+        group_key = normalize_alias_key(question_text)
+        if not group_key:
+            continue
+
+        group = grouped_columns.setdefault(
+            group_key,
+            {
+                "question_text": question_text,
+                "source_columns": [],
+                "response_choices": [],
+                "source_choices": {},
+            },
+        )
+        group["source_columns"].append(column)
+        group["source_choices"][column] = response_choice
+        if response_choice not in group["response_choices"]:
+            group["response_choices"].append(response_choice)
+
+    candidates: list[ColumnGroupCandidate] = []
+    for group_key, group in grouped_columns.items():
+        source_columns = group["source_columns"]
+        response_choices = group["response_choices"]
+        if len(source_columns) < 2 or len(response_choices) < 2:
+            continue
+
+        group_id = hashlib.sha1(
+            json.dumps(
+                {
+                    "question_text": group["question_text"],
+                    "source_columns": [str(column) for column in source_columns],
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        candidates.append(
+            ColumnGroupCandidate(
+                group_id=group_id,
+                question_text=group["question_text"],
+                variable_name=suggested_group_variable_name(
+                    [str(column) for column in source_columns],
+                    group["question_text"],
+                    used_group_names,
+                ),
+                source_columns=source_columns,
+                response_choices=response_choices,
+                source_choices=group["source_choices"],
+            )
+        )
+
+    return candidates
+
+
+def summarize_group_response_choices(choices: list[str], max_choices: int = 8) -> str:
+    if len(choices) > max_choices:
+        return " | ".join(choices[:max_choices]) + f" | +{len(choices) - max_choices} more"
+    return " | ".join(choices)
+
+
+def database_variable_name_options(
+    saved_mappings: dict[str, str],
+    prior_rules: list[dict] | None = None,
+) -> list[str]:
+    options: list[str] = []
+
+    def add_option(value) -> None:
+        option = normalize_answer(value)
+        if (
+            not option
+            or option.upper() == NA_NORM_OPTION
+            or is_default_na_metadata_variable(option)
+            or option in options
+        ):
+            return
+        options.append(option)
+
+    for source_variable, mapped_norm in saved_mappings.items():
+        normalized_norm = normalize_answer(mapped_norm)
+        if normalized_norm and normalized_norm.upper() != NA_NORM_OPTION:
+            add_option(source_variable)
+            add_option(normalized_norm)
+
+    for prior_rule in prior_rules or []:
+        add_option(prior_rule.get("Source variable"))
+        add_option(prior_rule.get("Norm / benchmark"))
+
+    return sorted(options, key=lambda value: normalize_sort_text(value))
+
+
+def column_group_review_frame(
+    candidates: list[ColumnGroupCandidate],
+    database_variable_options: list[str] | None = None,
+) -> pd.DataFrame:
+    frame = pd.DataFrame(
+        [
+            {
+                "_group_id": candidate.group_id,
+                "Combine": True,
+                "Grouped Variable": candidate.variable_name,
+                "Database Variable": USE_GROUPED_VARIABLE_NAME_OPTION,
+                "Question Text": candidate.question_text,
+                "Question Type": "Multi-Select",
+                "Source Columns": len(candidate.source_columns),
+                "Response Choices": summarize_group_response_choices(
+                    candidate.response_choices
+                ),
+            }
+            for candidate in candidates
+        ]
+    )
+    return frame.set_index("_group_id")
+
+
+def selected_option_from_grouped_column(value, response_choice: str) -> str | None:
+    normalized_value = normalize_answer(value)
+    normalized_choice = normalize_answer(response_choice)
+    if not normalized_value or not normalized_choice:
+        return None
+
+    value_key = normalize_sort_text(normalized_value)
+    choice_key = normalize_sort_text(normalized_choice)
+    non_selection_values = {
+        "-99",
+        "0",
+        "false",
+        "n",
+        "no",
+        "not selected",
+        "not_selected",
+        "unchecked",
+        "unselected",
+        "none selected",
+    }
+    selection_values = {
+        "1",
+        "true",
+        "y",
+        "yes",
+        "selected",
+        "checked",
+    }
+
+    if value_key in non_selection_values:
+        return None
+    if value_key == choice_key or value_key in selection_values:
+        return normalized_choice
+
+    return normalized_choice
+
+
+def combine_grouped_multi_select_values(
+    df: pd.DataFrame,
+    candidate: ColumnGroupCandidate,
+    delimiter: str,
+) -> pd.Series:
+    values = []
+    for _, row in df.iterrows():
+        selected_options = []
+        for source_column in candidate.source_columns:
+            selected_option = selected_option_from_grouped_column(
+                row.get(source_column),
+                candidate.source_choices.get(source_column, ""),
+            )
+            if selected_option and selected_option not in selected_options:
+                selected_options.append(selected_option)
+        values.append(delimiter.join(selected_options) if selected_options else None)
+
+    return pd.Series(values, index=df.index, dtype=object)
+
+
+def apply_column_group_decisions(
+    df: pd.DataFrame,
+    question_labels: dict[str, str],
+    response_labels: dict[str, dict[str, str]],
+    candidates: list[ColumnGroupCandidate],
+    edited_groups: pd.DataFrame,
+    delimiter: str,
+) -> tuple[pd.DataFrame, dict[str, str], dict[str, dict[str, str]], dict[str, str], list[str]]:
+    if edited_groups.empty:
+        return df, question_labels, response_labels, {}, []
+
+    candidates_by_id = {candidate.group_id: candidate for candidate in candidates}
+    selected_groups = []
+    for row_index, row in edited_groups.iterrows():
+        if not bool(row.get("Combine")):
+            continue
+
+        group_id = normalize_answer(row.get("_group_id")) or normalize_answer(row_index)
+        candidate = candidates_by_id.get(group_id)
+        if candidate is None:
+            continue
+
+        selected_database_variable = normalize_answer(row.get("Database Variable"))
+        grouped_variable = normalize_answer(row.get("Grouped Variable"))
+        variable_name = (
+            selected_database_variable
+            if selected_database_variable
+            and selected_database_variable != USE_GROUPED_VARIABLE_NAME_OPTION
+            else grouped_variable
+        )
+        selected_groups.append(
+            {
+                "candidate": candidate,
+                "variable_name": variable_name or candidate.variable_name,
+                "question_type": normalize_question_type(row.get("Question Type")),
+            }
+        )
+
+    if not selected_groups:
+        return df, question_labels, response_labels, {}, []
+
+    source_to_group_id = {
+        source_column: group["candidate"].group_id
+        for group in selected_groups
+        for source_column in group["candidate"].source_columns
+    }
+    group_by_id = {group["candidate"].group_id: group for group in selected_groups}
+    grouped_source_columns = set(source_to_group_id)
+    used_names = {
+        str(column)
+        for column in df.columns
+        if column not in grouped_source_columns
+    }
+
+    new_columns: dict[str, pd.Series] = {}
+    updated_question_labels: dict[str, str] = {}
+    updated_response_labels: dict[str, dict[str, str]] = {}
+    structure_question_types: dict[str, str] = {}
+    grouped_descriptions: list[str] = []
+    inserted_group_ids: set[str] = set()
+
+    for column in df.columns:
+        group_id = source_to_group_id.get(column)
+        if group_id is None:
+            new_columns[column] = df[column]
+            if column in question_labels:
+                updated_question_labels[column] = question_labels[column]
+            if column in response_labels:
+                updated_response_labels[column] = response_labels[column]
+            continue
+
+        if group_id in inserted_group_ids:
+            continue
+
+        group = group_by_id[group_id]
+        candidate = group["candidate"]
+        variable_name = make_unique_name(group["variable_name"], used_names)
+        new_columns[variable_name] = combine_grouped_multi_select_values(
+            df,
+            candidate,
+            delimiter,
+        )
+        updated_question_labels[variable_name] = candidate.question_text
+        updated_response_labels[variable_name] = {
+            choice: choice
+            for choice in candidate.response_choices
+            if normalize_answer(choice)
+        }
+        structure_question_types[variable_name] = group["question_type"]
+        grouped_descriptions.append(
+            f"{variable_name} ({len(candidate.source_columns)} columns)"
+        )
+        inserted_group_ids.add(group_id)
+
+    return (
+        pd.DataFrame(new_columns, index=df.index),
+        updated_question_labels,
+        updated_response_labels,
+        structure_question_types,
+        grouped_descriptions,
+    )
+
+
+def render_column_group_review(
+    df: pd.DataFrame,
+    question_labels: dict[str, str],
+    response_labels: dict[str, dict[str, str]],
+    delimiter: str,
+    key: str,
+    database_variable_options: list[str] | None = None,
+) -> tuple[pd.DataFrame, dict[str, str], dict[str, dict[str, str]], dict[str, str]]:
+    candidates = detect_column_group_candidates(df, question_labels)
+    if not candidates:
+        return df, question_labels, response_labels, {}
+    database_variable_options = database_variable_options or []
+    database_variable_select_options = [
+        USE_GROUPED_VARIABLE_NAME_OPTION,
+        *database_variable_options,
+    ]
+
+    st.subheader("File structure review")
+    st.caption(
+        "The app found repeated question text with response-choice suffixes. "
+        "Confirm which column sets should be combined into one audited question. "
+        "Use the database-variable dropdown when a saved variable name should be reused."
+    )
+    edited_groups = st.data_editor(
+        column_group_review_frame(candidates, database_variable_options),
+        key=key,
+        use_container_width=True,
+        hide_index=True,
+        num_rows="fixed",
+        column_order=[
+            "Combine",
+            "Grouped Variable",
+            "Database Variable",
+            "Question Text",
+            "Question Type",
+            "Source Columns",
+            "Response Choices",
+        ],
+        column_config={
+            "Combine": st.column_config.CheckboxColumn(
+                "Combine",
+                help="Create one question from these response-option columns.",
+                width="small",
+            ),
+            "Grouped Variable": st.column_config.TextColumn(
+                "Grouped Variable",
+                help="Variable name to use in the norm audit after combining.",
+                width=180,
+            ),
+            "Database Variable": st.column_config.SelectboxColumn(
+                "Database Variable",
+                options=database_variable_select_options,
+                required=True,
+                help="Pick an existing saved variable name to use instead of the grouped variable.",
+                width=220,
+            ),
+            "Question Text": st.column_config.TextColumn(
+                "Question Text",
+                disabled=True,
+                width=420,
+            ),
+            "Question Type": st.column_config.SelectboxColumn(
+                "Question Type",
+                options=QUESTION_TYPES,
+                required=True,
+                width=170,
+            ),
+            "Source Columns": st.column_config.NumberColumn(
+                "Source Columns",
+                disabled=True,
+                width=120,
+            ),
+            "Response Choices": st.column_config.TextColumn(
+                "Response Choices",
+                disabled=True,
+                width=620,
+            ),
+        },
+    )
+
+    (
+        updated_df,
+        updated_question_labels,
+        updated_response_labels,
+        structure_question_types,
+        grouped_descriptions,
+    ) = apply_column_group_decisions(
+        df,
+        question_labels,
+        response_labels,
+        candidates,
+        edited_groups,
+        delimiter,
+    )
+    if grouped_descriptions:
+        st.caption("Grouped columns: " + ", ".join(grouped_descriptions) + ".")
+
+    return (
+        updated_df,
+        updated_question_labels,
+        updated_response_labels,
+        structure_question_types,
+    )
+
+
 def default_group_column_index(columns: list[str]) -> int:
     normalized_columns = {
         normalize_column_name(str(column)): index
@@ -3839,25 +4298,55 @@ def prompt_for_missing_project_metadata(
 
     st.subheader("Project metadata")
     st.caption(
-        "These metadata fields are used as norm table filters. Add a value for "
-        "any missing field and the app will create that column for this workbook."
+        "These metadata fields are used as norm table filters. For each missing "
+        "field, type one value for the workbook or choose an existing variable."
     )
 
     updated_df = df.copy()
     updated_labels = dict(question_labels)
-    input_columns = st.columns(3)
+    source_options = [TYPE_METADATA_VALUE_OPTION, *list(df.columns)]
     added_variables = []
+    selected_source_columns = set()
     for index, variable in enumerate(missing_variables):
-        value = input_columns[index % 3].text_input(
-            variable,
-            key=f"project_metadata_value_{variable}",
-            placeholder=f"Enter {variable}",
+        source_col, value_col = st.columns([1, 1])
+        selected_source = source_col.selectbox(
+            f"{variable} source",
+            source_options,
+            key=f"project_metadata_source_{variable}",
+            format_func=lambda value: (
+                TYPE_METADATA_VALUE_OPTION
+                if value == TYPE_METADATA_VALUE_OPTION
+                else display_variable_with_label(value, question_labels)
+            ),
+            help=(
+                "Choose an uploaded variable to use as this metadata field, "
+                "or type one workbook-level value."
+            ),
         )
-        normalized_value = normalize_answer(value)
-        if normalized_value:
-            updated_df[variable] = normalized_value
+
+        if selected_source == TYPE_METADATA_VALUE_OPTION:
+            value = value_col.text_input(
+                variable,
+                key=f"project_metadata_value_{variable}",
+                placeholder=f"Enter {variable}",
+            )
+            normalized_value = normalize_answer(value)
+            if normalized_value:
+                updated_df[variable] = normalized_value
+                updated_labels[variable] = variable
+                added_variables.append(variable)
+            continue
+
+        if selected_source in df.columns:
+            updated_df[variable] = df[selected_source]
             updated_labels[variable] = variable
-            added_variables.append(variable)
+            selected_source_columns.add(selected_source)
+            added_variables.append(f"{variable} from {selected_source}")
+
+    for source_column in selected_source_columns:
+        if source_column in updated_df.columns and not is_project_metadata_variable(source_column):
+            updated_df = updated_df.drop(columns=[source_column])
+            updated_labels.pop(source_column, None)
 
     if added_variables:
         st.caption(
@@ -6567,6 +7056,7 @@ def main() -> None:
     prior_norm_rules = load_saved_norm_rule_history()
     box_score_settings: dict[str, list[str]] = {}
     question_type_settings: dict[str, str] = {}
+    structure_question_type_settings: dict[str, str] = {}
     audit_consistency_issues: list[dict] = []
     audit_consistency_confirmed = True
     respondent_id_column = None
@@ -6663,6 +7153,23 @@ def main() -> None:
                     data_sheet,
                 )
                 question_labels.update(label_question_labels)
+                database_variable_options = database_variable_name_options(
+                    saved_norm_mappings,
+                    prior_norm_rules,
+                )
+                (
+                    data,
+                    question_labels,
+                    response_labels,
+                    structure_question_type_settings,
+                ) = render_column_group_review(
+                    data,
+                    question_labels,
+                    response_labels,
+                    delimiter,
+                    key=f"column_group_review_{uploaded_file_name}_{data_sheet}",
+                    database_variable_options=database_variable_options,
+                )
                 st.subheader("Respondent ID setup")
                 respondent_id_column = render_respondent_id_selector(
                     data,
@@ -6702,8 +7209,12 @@ def main() -> None:
                     for column in columns
                     if column != group_column and not is_project_metadata_variable(column)
                 ]
+                audit_signature_payload = {
+                    "questions": [str(column) for column in candidate_questions],
+                    "structure_question_types": structure_question_type_settings,
+                }
                 audit_signature = hashlib.sha1(
-                    json.dumps([str(column) for column in candidate_questions]).encode("utf-8")
+                    json.dumps(audit_signature_payload, sort_keys=True).encode("utf-8")
                 ).hexdigest()
                 if st.session_state.get("norm_audit_signature") != audit_signature:
                     st.session_state.norm_audit_signature = audit_signature
@@ -6778,6 +7289,7 @@ def main() -> None:
                 }
                 effective_question_type_settings = {
                     **saved_question_type_settings,
+                    **structure_question_type_settings,
                     **pending_question_type_settings,
                 }
                 audit_frame = build_norm_audit_frame(

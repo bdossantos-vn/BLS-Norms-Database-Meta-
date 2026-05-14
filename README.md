@@ -12,7 +12,7 @@ streamlit run app.py
 
 - Norms are calculated at the response-option level.
 - Uploaded Excel files are interpreted as respondent-level data: each row is one respondent, and each column is one question or respondent field.
-- If project metadata fields are missing, the app prompts for values for `brand`, `industry`, `client`, `quarter`, `year`, `methodology`, `project`, `country`, and `c_key`.
+- If project metadata fields are missing, the app prompts for `brand`, `industry`, `client`, `quarter`, `year`, `methodology`, `project`, `country`, and `c_key`; each field can be typed as one workbook-level value or sourced from an existing uploaded variable.
 - Project metadata fields are excluded from norm-question audit rows and are not included in norm table output.
 - Workbook setup and question mapping are handled on the Survey Question Audit page rather than in the sidebar.
 - Each app page includes Back and Next page buttons for moving through the workflow.
@@ -28,6 +28,9 @@ streamlit run app.py
 - Confirmed standards changes should be followed by updating previous saved datasets so each metric is measured consistently.
 - Audit buttons can apply T2B, T3B, B2B, B3B, or clear box selections across all non-NA Scale / Likert questions.
 - The default data layout is the BLS / Smart Tables layout: row 1 contains variable names, row 2 contains question labels, and following rows contain respondent-level data.
+- During upload, the app reviews file structure for repeated question text with `- response choice` suffixes and can combine those option columns into one audited question with a selected question type.
+- Grouped upload questions can keep a custom grouped variable name or use a dropdown of existing saved database variable names for easier future matching.
+- Combined multi-select option columns use the response-choice suffix as the answer option and ignore common non-selection values such as `-99`, `0`, `false`, and `Not Selected`.
 - Standard survey platform/system columns such as StartDate, EndDate, IPAddress, Progress, Duration, and ResponseId stay visible in the audit table but default to `NA`.
 - Each included norm question corresponds to one audited source column in the selected Excel data sheet.
 - Each distinct non-empty value in a mapped question column is treated as a response option.
