@@ -1,0 +1,9 @@
+{
+  "action": "Before delete dataset",
+  "created_at": "2026-05-14 17:18:24",
+  "dataset_count": 2,
+  "dataset_id": "88d96ccec664c678",
+  "dataset_label": "OM AO US (Paloma) NE Q1 2026_April 28, 2026_13.54-2.xlsx | Sheet0 | 88d96ccec664c678",
+  "note": "Automatic safety snapshot before deleting a saved dataset.",
+  "version_id": "20260514171824_Before_delete_dataset"
+}

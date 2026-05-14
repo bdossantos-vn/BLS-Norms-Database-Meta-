@@ -1,0 +1,601 @@
+{
+  "control_label": "control",
+  "delimiter": ";",
+  "group_column": "cell",
+  "norm_rules": [
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "StartDate"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "EndDate"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Status"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "IPAddress"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Progress"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Duration (in seconds)"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Finished"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "RecordedDate"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "ResponseId"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "RecipientLastName"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "RecipientFirstName"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "RecipientEmail"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "ExternalReference"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "LocationLatitude"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "LocationLongitude"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "DistributionChannel"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "UserLanguage"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Q_RelevantIDDuplicate"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Q_RelevantIDDuplicateScore"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Q_RelevantIDFraudScore"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Q_RelevantIDLastStartDate"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Ignore",
+      "Source variable": "Q_DuplicateRespondent"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Product Awareness",
+      "Question Type": "Multi-Select",
+      "Source variable": "Product Awareness"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Brand Awareness",
+      "Question Type": "Multi-Select",
+      "Source variable": "Brand Awareness"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Consideration",
+      "Question Type": "Multi-Select",
+      "Source variable": "Consideration"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Multi-Select",
+      "Source variable": "Ad Recall"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "iLeadership",
+      "Question Type": "Multi-Select",
+      "Source variable": "iLeadership"
+    },
+    {
+      "Box scores": "T2B",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Purchase Intent",
+      "Question Type": "Scale / Likert",
+      "Source variable": "Purchase Intent"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Tech Leadership",
+      "Question Type": "Scale / Likert",
+      "Source variable": "Tech Leadership"
+    },
+    {
+      "Box scores": "T2B",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Brand Sentiment",
+      "Question Type": "Scale / Likert",
+      "Source variable": "Brand Sentiment"
+    },
+    {
+      "Box scores": "T2B",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Brand Advocacy",
+      "Question Type": "Scale / Likert",
+      "Source variable": "Brand Advocacy"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Retention",
+      "Question Type": "Scale / Likert",
+      "Source variable": "Retention"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Feature Awareness",
+      "Question Type": "Multi-Select",
+      "Source variable": "Feature Awareness"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "AI Interest",
+      "Question Type": "Scale / Likert",
+      "Source variable": "AI Interest"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Gender",
+      "Question Type": "Single-Select",
+      "Source variable": "Gender"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": true,
+      "Norm / benchmark": "Age",
+      "Question Type": "Single-Select",
+      "Source variable": "Age"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Single-Select",
+      "Source variable": "gc"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Single-Select",
+      "Source variable": "rid"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Single-Select",
+      "Source variable": "platform"
+    },
+    {
+      "Box scores": "",
+      "Denominator": "Total answering",
+      "Include": false,
+      "Norm / benchmark": "NA",
+      "Question Type": "Single-Select",
+      "Source variable": "ad"
+    }
+  ],
+  "question_labels": {
+    "AI Interest": "How would you describe your interest in AI or Smart glasses?",
+    "Ad Recall": "Do you recall seeing any influencer ads for Oakley Meta in the last 14 days?",
+    "Age": "How old are you?",
+    "Brand Advocacy": "How likely are you to recommend Oakley Meta glasses to friends and family?",
+    "Brand Awareness": "Which of the following brands are you aware of that make AI glasses? \n\nPlease select all that apply.",
+    "Brand Sentiment": "Based on what you know of the brand, how do you feel about Oakley Meta?",
+    "Consideration": "If you were going to buy AI glasses, which of the following would you consider? \nPlease select all that apply.",
+    "DistributionChannel": "Distribution Channel",
+    "Duration (in seconds)": "Duration (in seconds)",
+    "EndDate": "End Date",
+    "ExternalReference": "External Data Reference",
+    "Feature Awareness": "Which of the following features for Oakley Meta glasses have you heard of?\nPlease select all that apply.",
+    "Finished": "Finished",
+    "Gender": "How do you identify?",
+    "IPAddress": "IP Address",
+    "LocationLatitude": "Location Latitude",
+    "LocationLongitude": "Location Longitude",
+    "Product Awareness": "Which of these AI glasses have you heard of before today?\n\nPlease select all that apply.",
+    "Progress": "Progress",
+    "Purchase Intent": "How likely are you to purchase Oakley Meta glasses in the next 12 months?",
+    "Q_DuplicateRespondent": "Q_DuplicateRespondent",
+    "Q_RelevantIDDuplicate": "Q_RelevantIDDuplicate",
+    "Q_RelevantIDDuplicateScore": "Q_RelevantIDDuplicateScore",
+    "Q_RelevantIDFraudScore": "Q_RelevantIDFraudScore",
+    "Q_RelevantIDLastStartDate": "Q_RelevantIDLastStartDate",
+    "RecipientEmail": "Recipient Email",
+    "RecipientFirstName": "Recipient First Name",
+    "RecipientLastName": "Recipient Last Name",
+    "RecordedDate": "Recorded Date",
+    "ResponseId": "Response ID",
+    "Retention": "If you received Oakley Meta glasses today, how likely are you to consistently use it over the next year?",
+    "StartDate": "Start Date",
+    "Status": "Response Type",
+    "Tech Leadership": "Does Meta more often lead or follow other companies in developing and sharing new technologies?",
+    "UserLanguage": "User Language",
+    "ad": "ad",
+    "brand": "brand",
+    "c_key": "c_key",
+    "cell": "cell",
+    "client": "client",
+    "country": "country",
+    "gc": "gc",
+    "iLeadership": "Which of the following brands are leaders in AI glasses?\n\nPlease select all that apply.",
+    "industry": "industry",
+    "methodology": "methodology",
+    "platform": "platform",
+    "project": "project",
+    "quarter": "quarter",
+    "rid": "rid",
+    "year": "year"
+  },
+  "response_choice_settings": {
+    "AI Interest": {
+      "mappings": {},
+      "order": [
+        "Very interested",
+        "Somewhat interested",
+        "Moderately interested",
+        "Not that interested",
+        "Not at all interested",
+        "-99"
+      ]
+    },
+    "Age": {
+      "mappings": {
+        "25 - 34": "30 - 34",
+        "35 - 44": "35 - 44"
+      },
+      "order": [
+        "Under 18",
+        "18 - 24",
+        "30 - 34",
+        "35 - 44",
+        "45+"
+      ]
+    },
+    "Brand Advocacy": {
+      "mappings": {},
+      "order": [
+        "Very likely",
+        "Quite likely",
+        "Moderately likely",
+        "Not that likely",
+        "Not at all likely"
+      ]
+    },
+    "Brand Sentiment": {
+      "mappings": {
+        "Netural": "Neutral"
+      },
+      "order": [
+        "Love it",
+        "Like it",
+        "Neutral",
+        "Dislike it",
+        "Hate it"
+      ]
+    },
+    "OM Feature Awareness": {
+      "mappings": {
+        "Ask Meta AI": "Look and ask AI (Artificial Intelligence)",
+        "Capture photos/ videos": "Capture photos and videos"
+      },
+      "order": [
+        "Look and ask AI (Artificial Intelligence)",
+        "Capture photos and videos",
+        "Open ear audio",
+        "Garmin integration for real-time fitness stats",
+        "None of these"
+      ]
+    },
+    "Purchase Intent": {
+      "mappings": {},
+      "order": [
+        "Very likely",
+        "Quite likely",
+        "Moderately likely",
+        "Not that likely",
+        "Not at all likely"
+      ]
+    },
+    "Retention": {
+      "mappings": {},
+      "order": [
+        "Very likely",
+        "Quite likely",
+        "Moderately likely",
+        "Not that likely",
+        "Not at all likely"
+      ]
+    },
+    "Tech Leadership": {
+      "mappings": {},
+      "order": [
+        "Leads much more often",
+        "Leads somewhat more often",
+        "Follows somewhat more often",
+        "Follows more often"
+      ]
+    },
+    "WRBLS Awareness": {
+      "mappings": {
+        "Meta Ray-Ban Display": "Meta Ray-Ban Displays"
+      },
+      "order": [
+        "Amazon Echo Frames",
+        "Bose Frames",
+        "Snap Spectacles 3",
+        "Ray-Ban Meta Glasses",
+        "Meta Ray-Ban Displays",
+        "Oakley Meta Glasses",
+        "Carrera Glasses with Alexa",
+        "Solos AirGo3",
+        "Huawei Eyewear 2",
+        "XREAL Air/2/Pro",
+        "None of these"
+      ]
+    },
+    "WRBLS BR Awareness": {
+      "mappings": {
+        "None of the these": "None of these"
+      },
+      "order": [
+        "Meta",
+        "Apple",
+        "Snapchat",
+        "Bose",
+        "Amazon",
+        "Ray-Ban",
+        "Google",
+        "Carrera",
+        "Oakley",
+        "Prada",
+        "None of these"
+      ]
+    },
+    "WRBLS Consideration": {
+      "mappings": {
+        "Meta Ray-Ban Display": "Meta Ray-Ban Displays"
+      },
+      "order": [
+        "Amazon Echo Frames",
+        "Bose Frames",
+        "Snap Spectacles 3",
+        "Ray-Ban Meta Glasses",
+        "Meta Ray-Ban Displays",
+        "Oakley Meta Glasses",
+        "Carrera Glasses with Alexa",
+        "Solos AirGo3",
+        "Huawei Eyewear 2",
+        "XREAL Air/2/Pro",
+        "None of these"
+      ]
+    }
+  },
+  "response_labels": {
+    "Age": {
+      "18 - 24": "18 - 24",
+      "30 - 34": "30 - 34",
+      "35 - 44": "35 - 44",
+      "45+": "45+",
+      "Under 18": "Under 18"
+    },
+    "Brand Awareness": {
+      "Amazon": "Amazon",
+      "Apple": "Apple",
+      "Bose": "Bose",
+      "Carrera": "Carrera",
+      "Google": "Google",
+      "Meta": "Meta",
+      "None of the these": "None of the these",
+      "Oakley": "Oakley",
+      "Prada": "Prada",
+      "Ray-Ban": "Ray-Ban",
+      "Snapchat": "Snapchat"
+    },
+    "Brand Sentiment": {
+      "Dislike it": "Dislike it",
+      "Hate it": "Hate it",
+      "Like it": "Like it",
+      "Love it": "Love it",
+      "Neutral": "Neutral"
+    },
+    "Consideration": {
+      "Amazon Echo Frames": "Amazon Echo Frames",
+      "Bose Frames": "Bose Frames",
+      "Carrera Glasses with Alexa": "Carrera Glasses with Alexa",
+      "Huawei Eyewear 2": "Huawei Eyewear 2",
+      "Meta Ray-Ban Display": "Meta Ray-Ban Display",
+      "None of these": "None of these",
+      "Oakley Meta Glasses": "Oakley Meta Glasses",
+      "Ray-Ban Meta Glasses": "Ray-Ban Meta Glasses",
+      "Snap Spectacles 3": "Snap Spectacles 3",
+      "Solos AirGo3": "Solos AirGo3",
+      "XREAL Air/2/Pro": "XREAL Air/2/Pro"
+    },
+    "Feature Awareness": {
+      "Ask Meta AI": "Ask Meta AI",
+      "Capture photos/ videos": "Capture photos/ videos",
+      "Garmin integration for real-time fitness stats": "Garmin integration for real-time fitness stats",
+      "None of these": "None of these",
+      "Open ear audio": "Open ear audio"
+    },
+    "Product Awareness": {
+      "Amazon Echo Frames": "Amazon Echo Frames",
+      "Bose Frames": "Bose Frames",
+      "Carrera Glasses with Alexa": "Carrera Glasses with Alexa",
+      "Huawei Eyewear 2": "Huawei Eyewear 2",
+      "Meta Ray-Ban Display": "Meta Ray-Ban Display",
+      "None of these": "None of these",
+      "Oakley Meta Glasses": "Oakley Meta Glasses",
+      "Ray-Ban Meta Glasses": "Ray-Ban Meta Glasses",
+      "Snap Spectacles 3": "Snap Spectacles 3",
+      "Solos AirGo3": "Solos AirGo3",
+      "XREAL Air/2/Pro": "XREAL Air/2/Pro"
+    },
+    "iLeadership": {
+      "Amazon": "Amazon",
+      "Apple": "Apple",
+      "Bose": "Bose",
+      "Carrera": "Carrera",
+      "Google": "Google",
+      "Meta": "Meta",
+      "None of these": "None of these",
+      "Oakley": "Oakley",
+      "Prada": "Prada",
+      "Ray-Ban": "Ray-Ban",
+      "Snapchat": "Snapchat"
+    }
+  },
+  "split_multi_select": false,
+  "test_label": "test",
+  "version": "1"
+}
