@@ -31,6 +31,9 @@ streamlit run app.py
 - During upload, the app reviews file structure for repeated question text with `- response choice` suffixes and can combine those option columns into one audited question with a selected question type.
 - Grouped upload questions can keep a custom grouped variable name or use a dropdown of existing saved database variable names for easier future matching.
 - Combined multi-select option columns use the response-choice suffix as the answer option and ignore common non-selection values such as `-99`, `0`, `false`, and `Not Selected`.
+- The response choice review flags uploaded answer choices that do not exist for the selected norm/benchmark, then lets users add them as new choices or map them to an existing database choice.
+- Saved response choice treatments are stored in `response_choice_settings.json` and reused for future uploads, including mappings such as `25 - 29` and `30 - 34` into `25 - 34`.
+- Scale / Likert response choices can be manually ordered before full-scale rows or T2B/T3B/B2B/B3B rows are calculated.
 - Standard survey platform/system columns such as StartDate, EndDate, IPAddress, Progress, Duration, and ResponseId stay visible in the audit table but default to `NA`.
 - Each included norm question corresponds to one audited source column in the selected Excel data sheet.
 - Each distinct non-empty value in a mapped question column is treated as a response option.

@@ -51,6 +51,7 @@ SETTINGS_PATH = APP_DIR / "denominator_settings.json"
 NORM_MAPPING_PATH = APP_DIR / "norm_mapping_settings.json"
 BOX_SCORE_SETTINGS_PATH = APP_DIR / "box_score_settings.json"
 QUESTION_TYPE_SETTINGS_PATH = APP_DIR / "question_type_settings.json"
+RESPONSE_CHOICE_SETTINGS_PATH = APP_DIR / "response_choice_settings.json"
 NA_ALIAS_SETTINGS_PATH = APP_DIR / "na_alias_settings.json"
 CHANGELOG_PATH = APP_DIR / "CHANGELOG.md"
 STATUS_PATH = APP_DIR / "status.md"
@@ -85,6 +86,7 @@ NORM_DATASET_RULES_SHEET = "Rules"
 NORM_DATASET_NORM_RULES_SHEET = "Norm Rules"
 NORM_DATASET_QUESTION_LABELS_SHEET = "Question Labels"
 NORM_DATASET_RESPONSE_LABELS_SHEET = "Response Labels"
+NORM_DATASET_RESPONSE_CHOICE_SETTINGS_SHEET = "Response Choice Settings"
 DUPLICATE_RESPONDENT_ID_OVERLAP_THRESHOLD = 0.8
 SIGNIFICANCE_ALPHA = 0.05
 NORM_EXPORT_VERSION = "google-sheets-ppt-fonts-v1"
@@ -1116,6 +1118,61 @@ def save_question_type_settings(settings: dict[str, str]) -> None:
     QUESTION_TYPE_SETTINGS_PATH.write_text(json.dumps(clean_settings, indent=2, sort_keys=True) + "\n")
 
 
+def normalize_response_choice_settings(data: object) -> dict[str, dict]:
+    if not isinstance(data, dict):
+        return {}
+
+    settings: dict[str, dict] = {}
+    for norm, setting in data.items():
+        normalized_norm = normalize_answer(norm)
+        if not normalized_norm or not isinstance(setting, dict):
+            continue
+
+        mappings: dict[str, str] = {}
+        raw_mappings = setting.get("mappings", {})
+        if isinstance(raw_mappings, dict):
+            for source, target in raw_mappings.items():
+                source_choice = normalize_answer(source)
+                target_choice = normalize_answer(target)
+                if source_choice and target_choice:
+                    mappings[source_choice] = target_choice
+
+        order: list[str] = []
+        raw_order = setting.get("order", [])
+        if isinstance(raw_order, list):
+            for value in raw_order:
+                choice = normalize_answer(value)
+                if choice and choice not in order:
+                    order.append(choice)
+
+        if mappings or order:
+            settings[normalized_norm] = {
+                "mappings": mappings,
+                "order": order,
+            }
+
+    return settings
+
+
+def load_response_choice_settings() -> dict[str, dict]:
+    if not RESPONSE_CHOICE_SETTINGS_PATH.exists():
+        return {}
+
+    try:
+        data = json.loads(RESPONSE_CHOICE_SETTINGS_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    return normalize_response_choice_settings(data)
+
+
+def save_response_choice_settings(settings: dict[str, dict]) -> None:
+    clean_settings = normalize_response_choice_settings(settings)
+    RESPONSE_CHOICE_SETTINGS_PATH.write_text(
+        json.dumps(clean_settings, indent=2, sort_keys=True) + "\n"
+    )
+
+
 def load_na_alias_settings() -> set[str]:
     if not NA_ALIAS_SETTINGS_PATH.exists():
         return set()
@@ -1589,6 +1646,7 @@ def sort_response_options(
     question_labels: dict[str, str],
     response_labels: dict[str, dict[str, str]],
     question_type: str | None = None,
+    response_order: list[str] | None = None,
 ) -> list[str]:
     if not options:
         return []
@@ -1600,6 +1658,29 @@ def sort_response_options(
         for option in options
     }
     display_labels = [label_lookup[option] for option in options]
+
+    response_order = [
+        choice
+        for choice in (response_order or [])
+        if normalize_answer(choice)
+    ]
+    if response_order:
+        order_lookup = {
+            normalize_alias_key(choice): index
+            for index, choice in enumerate(response_order)
+            if normalize_alias_key(choice)
+        }
+        ordered_options = sorted(
+            options,
+            key=lambda option: (
+                order_lookup.get(
+                    normalize_alias_key(label_lookup.get(option, option)),
+                    len(order_lookup),
+                ),
+                options.index(option),
+            ),
+        )
+        return anchor_exclusive_options_last(ordered_options, label_lookup)
 
     age_hits = sum(age_bucket_key(label) is not None for label in display_labels)
     if "age" in normalize_sort_text(question_label) or age_hits >= max(2, len(options) // 2):
@@ -1634,6 +1715,7 @@ def response_options_for_question(
     delimiter: str,
     question_labels: dict[str, str] | None = None,
     question_type: str | None = None,
+    response_order: list[str] | None = None,
 ) -> list[str]:
     options: list[str] = []
     question_labels = question_labels or {}
@@ -1655,7 +1737,14 @@ def response_options_for_question(
     if question_type in {"Numeric Data", "Open-End Text", "Ignore"}:
         return []
 
-    return sort_response_options(question, options, question_labels, response_labels, question_type)
+    return sort_response_options(
+        question,
+        options,
+        question_labels,
+        response_labels,
+        question_type,
+        response_order,
+    )
 
 
 def box_score_base_options(
@@ -2112,6 +2201,7 @@ def summarize_response_options(
     delimiter: str,
     question_labels: dict[str, str] | None = None,
     question_type: str | None = None,
+    response_order: list[str] | None = None,
     max_options: int = 8,
 ) -> str:
     options = response_options_for_question(
@@ -2122,6 +2212,7 @@ def summarize_response_options(
         delimiter,
         question_labels,
         question_type,
+        response_order,
     )
     labels = [display_response_label(question, option, response_labels) for option in options]
     if len(labels) > max_options:
@@ -2362,6 +2453,467 @@ def included_norm_mappings(audit_mappings: dict[str, str]) -> dict[str, str]:
         for variable, norm in audit_mappings.items()
         if norm and norm != NA_NORM_OPTION
     }
+
+
+def merge_response_choice_settings(
+    base_settings: dict[str, dict],
+    update_settings: dict[str, dict],
+) -> dict[str, dict]:
+    merged = normalize_response_choice_settings(base_settings)
+    updates = normalize_response_choice_settings(update_settings)
+
+    for norm, setting in updates.items():
+        norm_setting = merged.setdefault(norm, {"mappings": {}, "order": []})
+        norm_setting["mappings"] = {
+            **norm_setting.get("mappings", {}),
+            **setting.get("mappings", {}),
+        }
+        order = [
+            choice
+            for choice in norm_setting.get("order", [])
+            if normalize_answer(choice)
+        ]
+        for choice in setting.get("order", []):
+            if choice not in order:
+                order.append(choice)
+        norm_setting["order"] = order
+
+    return normalize_response_choice_settings(merged)
+
+
+def add_unique_response_choice(options: list[str], choice) -> None:
+    normalized_choice = normalize_answer(choice)
+    if not normalized_choice:
+        return
+    existing_keys = {normalize_alias_key(option) for option in options}
+    if normalize_alias_key(normalized_choice) not in existing_keys:
+        options.append(normalized_choice)
+
+
+def closest_response_choice(source_choice: str, target_choices: list[str]) -> str | None:
+    source_key = normalize_alias_key(source_choice)
+    if not source_key or not target_choices:
+        return None
+
+    best_choice = None
+    best_score = 0.0
+    for target_choice in target_choices:
+        target_key = normalize_alias_key(target_choice)
+        if not target_key:
+            continue
+        score = SequenceMatcher(None, source_key, target_key).ratio()
+        if score > best_score:
+            best_score = score
+            best_choice = target_choice
+
+    return best_choice if best_score >= 0.45 else target_choices[0]
+
+
+def response_choice_labels_for_question(
+    df: pd.DataFrame,
+    question: str,
+    response_labels: dict[str, dict[str, str]],
+    split_multi_select: bool,
+    delimiter: str,
+    question_labels: dict[str, str],
+    question_type: str | None,
+    response_order: list[str] | None = None,
+) -> list[str]:
+    options = response_options_for_question(
+        df,
+        question,
+        response_labels,
+        split_multi_select,
+        delimiter,
+        question_labels,
+        question_type,
+        response_order,
+    )
+    labels: list[str] = []
+    for option in options:
+        label = display_response_label(question, option, response_labels)
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
+def response_choice_settings_for_norm(
+    settings: dict[str, dict],
+    norm: str,
+) -> dict:
+    normalized = normalize_response_choice_settings({norm: settings.get(norm, {})})
+    return normalized.get(norm, {"mappings": {}, "order": []})
+
+
+def database_response_options_by_norm(
+    saved_records: list[dict],
+    saved_response_choice_settings: dict[str, dict],
+) -> dict[str, list[str]]:
+    options_by_norm: dict[str, list[str]] = {}
+
+    for norm, setting in normalize_response_choice_settings(saved_response_choice_settings).items():
+        options = options_by_norm.setdefault(norm, [])
+        for choice in setting.get("order", []):
+            add_unique_response_choice(options, choice)
+        for target_choice in setting.get("mappings", {}).values():
+            add_unique_response_choice(options, target_choice)
+
+    for record in saved_records:
+        dataset_id = normalize_answer(record.get("dataset_id"))
+        if not dataset_id:
+            continue
+
+        dataset_path = norm_database_dataset_path(dataset_id)
+        rules = read_norm_dataset_rules(dataset_path)
+        if rules is None:
+            continue
+
+        try:
+            source_data = pd.read_excel(
+                dataset_path,
+                sheet_name=NORM_DATASET_RESPONDENT_SHEET,
+                dtype=object,
+            )
+        except Exception:
+            continue
+
+        response_labels = rules.get("response_labels", {})
+        question_labels = rules.get("question_labels", {})
+        response_choice_settings = rules.get("response_choice_settings", {})
+        for rule in rules.get("norm_rules", []):
+            source_variable = normalize_answer(rule.get("Source variable"))
+            norm = normalize_answer(rule.get("Norm / benchmark")) or source_variable
+            if (
+                not source_variable
+                or not norm
+                or norm == NA_NORM_OPTION
+                or source_variable not in source_data.columns
+                or not norm_rule_is_included(rule)
+            ):
+                continue
+
+            norm_setting = response_choice_settings_for_norm(
+                response_choice_settings,
+                norm,
+            )
+            labels = response_choice_labels_for_question(
+                source_data,
+                source_variable,
+                response_labels,
+                rules.get("split_multi_select", False),
+                rules.get("delimiter", ";"),
+                question_labels,
+                rule.get("Question Type"),
+                norm_setting.get("order", []),
+            )
+            options = options_by_norm.setdefault(norm, [])
+            for choice in labels:
+                add_unique_response_choice(options, choice)
+
+    return options_by_norm
+
+
+def mapped_response_choice(
+    source_choice: str,
+    norm_setting: dict,
+) -> str:
+    mappings = norm_setting.get("mappings", {})
+    normalized_source = normalize_answer(source_choice) or ""
+    if normalized_source in mappings:
+        return mappings[normalized_source]
+
+    source_key = normalize_alias_key(normalized_source)
+    for saved_source, saved_target in mappings.items():
+        if normalize_alias_key(saved_source) == source_key:
+            return saved_target
+
+    return normalized_source
+
+
+def response_choices_after_mapping(
+    source_choices: list[str],
+    norm_setting: dict,
+) -> list[str]:
+    choices: list[str] = []
+    for source_choice in source_choices:
+        mapped_choice = mapped_response_choice(source_choice, norm_setting)
+        if mapped_choice and mapped_choice not in choices:
+            choices.append(mapped_choice)
+
+    ordered_choices = []
+    for choice in norm_setting.get("order", []):
+        if choice in choices and choice not in ordered_choices:
+            ordered_choices.append(choice)
+    ordered_choices.extend(choice for choice in choices if choice not in ordered_choices)
+    return ordered_choices
+
+
+def render_response_choice_review(
+    df: pd.DataFrame,
+    norm_questions: list[str],
+    included_mappings: dict[str, str],
+    response_labels: dict[str, dict[str, str]],
+    question_labels: dict[str, str],
+    question_type_settings: dict[str, str],
+    split_multi_select: bool,
+    delimiter: str,
+    saved_response_choice_settings: dict[str, dict],
+    saved_records: list[dict],
+    audit_signature: str,
+) -> dict[str, dict]:
+    if df is None or df.empty or not norm_questions:
+        return normalize_response_choice_settings(saved_response_choice_settings)
+
+    database_options = database_response_options_by_norm(
+        saved_records,
+        saved_response_choice_settings,
+    )
+    updated_settings = normalize_response_choice_settings(saved_response_choice_settings)
+    review_rows = 0
+
+    st.subheader("Response choice review")
+    st.caption(
+        "When an uploaded variable maps to an existing norm, flag response choices "
+        "that are not already in that norm. Add truly new choices or map them into "
+        "an existing database choice. Scale questions can also be manually ordered."
+    )
+
+    for question in norm_questions:
+        if question not in df.columns:
+            continue
+
+        norm = included_mappings.get(question, question)
+        question_type = normalize_question_type(
+            question_type_settings.get(question, "Single-Select")
+        )
+        norm_setting = response_choice_settings_for_norm(updated_settings, norm)
+        source_choices = response_choice_labels_for_question(
+            df,
+            question,
+            response_labels,
+            split_multi_select,
+            delimiter,
+            question_labels,
+            question_type,
+            norm_setting.get("order", []),
+        )
+        if not source_choices:
+            continue
+
+        db_options = database_options.get(norm, [])
+        db_option_keys = {normalize_alias_key(choice) for choice in db_options}
+        mappings = dict(norm_setting.get("mappings", {}))
+        unmatched_choices = []
+        for source_choice in source_choices:
+            mapped_choice = mapped_response_choice(
+                source_choice,
+                {"mappings": mappings, "order": norm_setting.get("order", [])},
+            )
+            has_saved_treatment = any(
+                normalize_alias_key(saved_source) == normalize_alias_key(source_choice)
+                for saved_source in mappings
+            )
+            if (
+                db_options
+                and normalize_alias_key(mapped_choice) not in db_option_keys
+                and not has_saved_treatment
+            ):
+                unmatched_choices.append(source_choice)
+
+        should_review_order = (
+            question_type == "Scale / Likert"
+            or bool(norm_setting.get("order"))
+            or is_scale_answer_set(
+                source_choices,
+                display_question_label(question, question_labels),
+            )
+            or (bool(unmatched_choices) and len(source_choices) <= 12)
+        )
+        if not unmatched_choices and not should_review_order:
+            continue
+
+        review_rows += len(unmatched_choices)
+        expander_label = (
+            f"{question} -> {norm}"
+            + (f" ({len(unmatched_choices)} unmatched)" if unmatched_choices else "")
+        )
+        with st.expander(expander_label, expanded=bool(unmatched_choices)):
+            if unmatched_choices:
+                for source_choice in unmatched_choices:
+                    source_key = hashlib.sha1(
+                        f"{audit_signature}|{norm}|{source_choice}".encode("utf-8")
+                    ).hexdigest()[:12]
+                    treatment = st.selectbox(
+                        f"`{source_choice}` treatment",
+                        ["Add as new choice", "Map to existing choice"],
+                        key=f"response_choice_treatment_{source_key}",
+                    )
+                    if treatment == "Map to existing choice" and db_options:
+                        suggested_choice = closest_response_choice(source_choice, db_options)
+                        default_index = (
+                            db_options.index(suggested_choice)
+                            if suggested_choice in db_options
+                            else 0
+                        )
+                        target_choice = st.selectbox(
+                            f"Map `{source_choice}` to",
+                            db_options,
+                            index=default_index,
+                            key=f"response_choice_target_{source_key}",
+                        )
+                    else:
+                        target_choice = source_choice
+                    mappings[source_choice] = target_choice
+
+            mapped_choices = response_choices_after_mapping(
+                source_choices,
+                {"mappings": mappings, "order": norm_setting.get("order", [])},
+            )
+            for db_choice in db_options:
+                if db_choice in mapped_choices:
+                    continue
+                if db_choice in norm_setting.get("order", []):
+                    mapped_choices.append(db_choice)
+
+            order = list(norm_setting.get("order", []))
+            if should_review_order:
+                order_choices = [
+                    choice for choice in order if choice in mapped_choices
+                ]
+                order_choices.extend(
+                    choice for choice in mapped_choices if choice not in order_choices
+                )
+                order_frame = pd.DataFrame(
+                    [
+                        {"Response choice": choice, "Order": index + 1}
+                        for index, choice in enumerate(order_choices)
+                    ]
+                )
+                edited_order = st.data_editor(
+                    order_frame,
+                    key=f"response_choice_order_{audit_signature}_{setting_key(norm)}",
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="fixed",
+                    column_config={
+                        "Response choice": st.column_config.TextColumn(
+                            "Response choice",
+                            disabled=True,
+                            width=360,
+                        ),
+                        "Order": st.column_config.NumberColumn(
+                            "Order",
+                            min_value=1,
+                            step=1,
+                            width=100,
+                        ),
+                    },
+                )
+                order = [
+                    row["Response choice"]
+                    for row in sorted(
+                        edited_order.to_dict(orient="records"),
+                        key=lambda row: (
+                            int(row.get("Order") or 999),
+                            normalize_sort_text(row.get("Response choice")),
+                        ),
+                    )
+                    if normalize_answer(row.get("Response choice"))
+                ]
+            elif not order:
+                order = mapped_choices
+
+            updated_settings[norm] = {
+                "mappings": mappings,
+                "order": order,
+            }
+
+    if review_rows == 0:
+        st.caption("No unmatched response choices found for mapped variables.")
+
+    return normalize_response_choice_settings(updated_settings)
+
+
+def apply_response_choice_settings_to_upload(
+    df: pd.DataFrame,
+    norm_questions: list[str],
+    included_mappings: dict[str, str],
+    response_labels: dict[str, dict[str, str]],
+    question_labels: dict[str, str],
+    question_type_settings: dict[str, str],
+    split_multi_select: bool,
+    delimiter: str,
+    response_choice_settings: dict[str, dict],
+) -> tuple[pd.DataFrame, dict[str, dict[str, str]]]:
+    if df is None or df.empty or not response_choice_settings:
+        return df, response_labels
+
+    updated_df = df.copy()
+    updated_response_labels = {
+        question: dict(labels)
+        for question, labels in response_labels.items()
+    }
+
+    for question in norm_questions:
+        if question not in updated_df.columns:
+            continue
+
+        norm = included_mappings.get(question, question)
+        norm_setting = response_choice_settings_for_norm(response_choice_settings, norm)
+        mappings = norm_setting.get("mappings", {})
+        if not mappings:
+            continue
+
+        question_type = normalize_question_type(
+            question_type_settings.get(question, "Single-Select")
+        )
+        should_split = (
+            question_type == "Multi-Select"
+            or split_multi_select
+            or infer_multi_select(updated_df[question])
+        )
+
+        def map_value(value):
+            if should_split:
+                source_parts = bls_response_parts(value, delimiter)
+            else:
+                normalized_value = normalize_answer(value)
+                source_parts = [normalized_value] if normalized_value else []
+
+            mapped_parts = []
+            for source_part in source_parts:
+                source_label = display_response_label(
+                    question,
+                    source_part,
+                    updated_response_labels,
+                )
+                mapped_part = mapped_response_choice(source_label, norm_setting)
+                if mapped_part and mapped_part not in mapped_parts:
+                    mapped_parts.append(mapped_part)
+
+            if not mapped_parts:
+                return None
+            if should_split:
+                return delimiter.join(mapped_parts)
+            return mapped_parts[0]
+
+        updated_df[question] = updated_df[question].map(map_value)
+        mapped_labels = response_choice_labels_for_question(
+            updated_df,
+            question,
+            {},
+            should_split,
+            delimiter,
+            question_labels,
+            question_type,
+            norm_setting.get("order", []),
+        )
+        updated_response_labels[question] = {
+            label: label
+            for label in mapped_labels
+        }
+
+    return updated_df, updated_response_labels
 
 
 def normalize_column_name(value: str) -> str:
@@ -3261,6 +3813,7 @@ def calculate_norm_table(
     question_labels: dict[str, str] | None = None,
     box_scores: list[str] | None = None,
     question_type: str | None = None,
+    response_order: list[str] | None = None,
 ) -> pd.DataFrame:
     response_labels = response_labels or {}
     question_labels = question_labels or {}
@@ -3295,6 +3848,7 @@ def calculate_norm_table(
         delimiter,
         question_labels,
         question_type,
+        response_order,
     )
     control_counts = response_counts(
         control_df,
@@ -3400,6 +3954,7 @@ def calculate_norm_count_summary(
     question_labels: dict[str, str] | None = None,
     box_scores: list[str] | None = None,
     question_type: str | None = None,
+    response_order: list[str] | None = None,
 ) -> dict:
     response_labels = response_labels or {}
     question_labels = question_labels or {}
@@ -3434,6 +3989,7 @@ def calculate_norm_count_summary(
         delimiter,
         question_labels,
         question_type,
+        response_order,
     )
     control_counts = response_counts(
         control_df,
@@ -3572,6 +4128,43 @@ def build_combined_saved_norm_tables(
         test_label = rules.get("test_label")
         response_labels = rules.get("response_labels", {})
         question_labels = rules.get("question_labels", {})
+        response_choice_settings = rules.get("response_choice_settings", {})
+        included_rules = [
+            rule
+            for rule in rules.get("norm_rules", [])
+            if norm_rule_is_included(rule)
+            and normalize_answer(rule.get("Norm / benchmark")) != NA_NORM_OPTION
+        ]
+        record_norm_questions = [
+            normalize_answer(rule.get("Source variable"))
+            for rule in included_rules
+            if normalize_answer(rule.get("Source variable"))
+        ]
+        record_mappings = {
+            source_variable: (
+                normalize_answer(rule.get("Norm / benchmark")) or source_variable
+            )
+            for rule in included_rules
+            for source_variable in [normalize_answer(rule.get("Source variable"))]
+            if source_variable
+        }
+        record_question_types = {
+            source_variable: normalize_question_type(rule.get("Question Type"))
+            for rule in included_rules
+            for source_variable in [normalize_answer(rule.get("Source variable"))]
+            if source_variable
+        }
+        source_data, response_labels = apply_response_choice_settings_to_upload(
+            source_data,
+            record_norm_questions,
+            record_mappings,
+            response_labels,
+            question_labels,
+            record_question_types,
+            rules.get("split_multi_select", False),
+            rules.get("delimiter", ";"),
+            response_choice_settings,
+        )
         source_data = apply_saved_norm_filters(
             source_data,
             question_labels,
@@ -3594,6 +4187,10 @@ def build_combined_saved_norm_tables(
             denominator = rule.get("Denominator", DEFAULT_DENOMINATOR)
             if denominator not in DENOMINATOR_OPTIONS:
                 denominator = DEFAULT_DENOMINATOR
+            norm_response_settings = response_choice_settings_for_norm(
+                response_choice_settings,
+                metric,
+            )
             summary = calculate_norm_count_summary(
                 source_data,
                 source_variable,
@@ -3607,6 +4204,7 @@ def build_combined_saved_norm_tables(
                 question_labels,
                 normalize_box_score_list(rule.get("Box scores")),
                 rule.get("Question Type"),
+                norm_response_settings.get("order", []),
             )
 
             metric_counts = combined_counts.setdefault(
@@ -3801,12 +4399,33 @@ def build_norm_tables(
     saved_box_score_settings: dict[str, list[str]],
     question_type_settings: dict[str, str],
     saved_question_type_settings: dict[str, str],
+    response_choice_settings: dict[str, dict] | None = None,
 ) -> dict[str, pd.DataFrame]:
     tables: dict[str, pd.DataFrame] = {}
+    response_choice_settings = response_choice_settings or {}
+    effective_question_types = {
+        question: question_type_settings.get(
+            question,
+            saved_question_type_settings.get(question, "Single-Select"),
+        )
+        for question in norm_questions
+    }
+    df, response_labels = apply_response_choice_settings_to_upload(
+        df,
+        norm_questions,
+        included_mappings,
+        response_labels,
+        question_labels,
+        effective_question_types,
+        split_multi_select,
+        delimiter,
+        response_choice_settings,
+    )
 
     for question in norm_questions:
         mapped_norm = included_mappings.get(question, question)
         denominator_setting = denominator_settings.get(question, DEFAULT_DENOMINATOR)
+        norm_response_settings = response_choice_settings.get(mapped_norm, {})
         tables[f"{mapped_norm}__{question}"] = calculate_norm_table(
             df,
             question,
@@ -3826,6 +4445,7 @@ def build_norm_tables(
                 question,
                 saved_question_type_settings.get(question),
             ),
+            norm_response_settings.get("order", []),
         )
 
     return tables
@@ -5825,6 +6445,7 @@ def norm_database_rules_for_upload(
     saved_box_score_settings: dict[str, list[str]],
     question_type_settings: dict[str, str],
     saved_question_type_settings: dict[str, str],
+    response_choice_settings: dict[str, dict] | None = None,
 ) -> dict:
     norm_rules = []
     norm_question_set = set(norm_questions)
@@ -5863,6 +6484,9 @@ def norm_database_rules_for_upload(
         "norm_rules": norm_rules,
         "response_labels": response_labels,
         "question_labels": question_labels,
+        "response_choice_settings": normalize_response_choice_settings(
+            response_choice_settings or {}
+        ),
     }
 
 
@@ -5982,6 +6606,42 @@ def write_norm_dataset_rules(
         columns=["Source variable", "Response value", "Response label"],
     ).to_excel(writer, sheet_name=NORM_DATASET_RESPONSE_LABELS_SHEET, index=False)
 
+    response_choice_rows = []
+    for norm, setting in normalize_response_choice_settings(
+        rules.get("response_choice_settings", {})
+    ).items():
+        for source_choice, target_choice in setting.get("mappings", {}).items():
+            response_choice_rows.append(
+                {
+                    "Norm / benchmark": norm,
+                    "Source response choice": source_choice,
+                    "Target response choice": target_choice,
+                    "Order": None,
+                }
+            )
+        for index, choice in enumerate(setting.get("order", []), start=1):
+            response_choice_rows.append(
+                {
+                    "Norm / benchmark": norm,
+                    "Source response choice": None,
+                    "Target response choice": choice,
+                    "Order": index,
+                }
+            )
+    pd.DataFrame(
+        response_choice_rows,
+        columns=[
+            "Norm / benchmark",
+            "Source response choice",
+            "Target response choice",
+            "Order",
+        ],
+    ).to_excel(
+        writer,
+        sheet_name=NORM_DATASET_RESPONSE_CHOICE_SETTINGS_SHEET,
+        index=False,
+    )
+
 
 def read_norm_dataset_rules(dataset_path: Path) -> dict | None:
     try:
@@ -6031,6 +6691,44 @@ def read_norm_dataset_rules(dataset_path: Path) -> dict | None:
     except Exception:
         response_labels = {}
 
+    response_choice_settings: dict[str, dict] = {}
+    try:
+        response_choice_settings_df = pd.read_excel(
+            dataset_path,
+            sheet_name=NORM_DATASET_RESPONSE_CHOICE_SETTINGS_SHEET,
+            dtype=object,
+        )
+        order_rows: dict[str, list[tuple[int, str]]] = {}
+        for _index, row in response_choice_settings_df.iterrows():
+            norm = normalize_answer(row.get("Norm / benchmark"))
+            target_choice = normalize_answer(row.get("Target response choice"))
+            if not norm or not target_choice:
+                continue
+
+            setting = response_choice_settings.setdefault(
+                norm,
+                {"mappings": {}, "order": []},
+            )
+            source_choice = normalize_answer(row.get("Source response choice"))
+            if source_choice:
+                setting["mappings"][source_choice] = target_choice
+
+            order_value = pd.to_numeric(pd.Series([row.get("Order")]), errors="coerce").iloc[0]
+            if not pd.isna(order_value):
+                order_rows.setdefault(norm, []).append((int(order_value), target_choice))
+
+        for norm, rows in order_rows.items():
+            order = []
+            for _order_value, target_choice in sorted(rows, key=lambda item: item[0]):
+                if target_choice not in order:
+                    order.append(target_choice)
+            response_choice_settings.setdefault(
+                norm,
+                {"mappings": {}, "order": []},
+            )["order"] = order
+    except Exception:
+        response_choice_settings = {}
+
     norm_rules = []
     for _index, row in norm_rules_df.iterrows():
         source_variable = normalize_answer(row.get("Source variable"))
@@ -6066,6 +6764,9 @@ def read_norm_dataset_rules(dataset_path: Path) -> dict | None:
         "norm_rules": norm_rules,
         "response_labels": response_labels,
         "question_labels": question_labels,
+        "response_choice_settings": normalize_response_choice_settings(
+            response_choice_settings
+        ),
     }
 
 
@@ -6871,6 +7572,7 @@ def render_saved_datasets_tab() -> None:
             {},
             question_type_settings,
             {},
+            rules.get("response_choice_settings", {}),
         )
         success, message = update_saved_norm_dataset_rules(
             selected_record,
@@ -7089,11 +7791,13 @@ def main() -> None:
     saved_norm_mappings = load_norm_mapping_settings()
     saved_box_score_settings = load_box_score_settings()
     saved_question_type_settings = load_question_type_settings()
+    saved_response_choice_settings = load_response_choice_settings()
     saved_na_alias_settings = load_na_alias_settings()
     saved_denominator_settings = load_denominator_settings()
     prior_norm_rules = load_saved_norm_rule_history()
     box_score_settings: dict[str, list[str]] = {}
     question_type_settings: dict[str, str] = {}
+    response_choice_settings: dict[str, dict] = {}
     structure_question_type_settings: dict[str, str] = {}
     audit_consistency_issues: list[dict] = []
     audit_consistency_confirmed = True
@@ -7122,6 +7826,7 @@ def main() -> None:
             norm_mappings = saved_norm_mappings
             box_score_settings = saved_box_score_settings
             question_type_settings = saved_question_type_settings
+            response_choice_settings = saved_response_choice_settings
             included_mappings = included_norm_mappings(norm_mappings)
             norm_questions = list(included_mappings.keys())
         else:
@@ -7459,6 +8164,32 @@ def main() -> None:
                     f"{sum(len(box_score_settings.get(question, [])) for question in norm_questions):,}",
                 )
 
+                if norm_questions:
+                    response_choice_settings = render_response_choice_review(
+                        data,
+                        norm_questions,
+                        included_mappings,
+                        response_labels,
+                        question_labels,
+                        question_type_settings,
+                        split_multi_select,
+                        delimiter,
+                        saved_response_choice_settings,
+                        load_norm_database_manifest(),
+                        audit_signature,
+                    )
+                    data, response_labels = apply_response_choice_settings_to_upload(
+                        data,
+                        norm_questions,
+                        included_mappings,
+                        response_labels,
+                        question_labels,
+                        question_type_settings,
+                        split_multi_select,
+                        delimiter,
+                        response_choice_settings,
+                    )
+
                 audit_consistency_issues = norm_audit_prior_rule_issues(
                     edited_audit,
                     prior_norm_rules,
@@ -7490,12 +8221,14 @@ def main() -> None:
                     save_norm_mapping_settings(norm_mappings)
                     save_box_score_settings(box_score_settings)
                     save_question_type_settings(question_type_settings)
+                    save_response_choice_settings(response_choice_settings)
                     saved_na_alias_settings = merge_na_alias_settings(
                         normalize_na_aliases_from_audit_editor(edited_audit)
                     )
                     saved_norm_mappings = load_norm_mapping_settings()
                     saved_box_score_settings = load_box_score_settings()
                     saved_question_type_settings = load_question_type_settings()
+                    saved_response_choice_settings = load_response_choice_settings()
                     st.session_state.norm_audit_pending_box_score_settings = saved_box_score_settings
                     st.session_state.norm_audit_pending_question_type_settings = saved_question_type_settings
                     st.success("Norm / benchmark audit mapping saved.")
@@ -7587,6 +8320,7 @@ def main() -> None:
                     saved_box_score_settings,
                     question_type_settings,
                     saved_question_type_settings,
+                    response_choice_settings,
                 )
                 database_record = norm_database_record_for_upload(
                     workbook_bytes,
@@ -7618,6 +8352,7 @@ def main() -> None:
                     saved_box_score_settings,
                     question_type_settings,
                     saved_question_type_settings,
+                    response_choice_settings,
                 )
                 render_norm_database_save_controls(
                     database_record,
