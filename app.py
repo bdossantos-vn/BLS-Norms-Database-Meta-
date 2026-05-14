@@ -409,6 +409,12 @@ def apply_bls_theme() -> None:
                 color-scheme: light;
             }
 
+            .stApp *,
+            [data-testid="stMain"] *,
+            [data-testid="stAppViewContainer"] * {
+                color-scheme: light !important;
+            }
+
             .block-container {
                 padding-top: 1.25rem;
                 padding-bottom: 3rem;
@@ -487,11 +493,12 @@ def apply_bls_theme() -> None:
             }
 
             .stTabs [aria-selected="true"] {
-                background: var(--vn-black);
+                background: var(--vn-white);
+                border-bottom: 3px solid var(--vn-red);
             }
 
             .stTabs [aria-selected="true"] * {
-                color: var(--vn-white) !important;
+                color: var(--vn-black) !important;
             }
 
             .stButton > button,
@@ -544,12 +551,32 @@ def apply_bls_theme() -> None:
             [data-testid="stAlert"],
             [data-testid="stExpander"] details,
             details {
+                background: var(--vn-white) !important;
                 border-radius: 8px !important;
                 border-color: var(--vn-gray-200) !important;
+                color: var(--vn-black) !important;
+            }
+
+            [data-testid="stAlert"] *,
+            [data-testid="stExpander"] *,
+            details *,
+            summary,
+            summary * {
+                color: var(--vn-black) !important;
+                fill: var(--vn-black) !important;
+            }
+
+            [data-testid="stExpander"] summary,
+            details summary {
+                background: var(--vn-white) !important;
             }
 
             [data-testid="stMain"] div[data-baseweb="select"] > div,
             [data-testid="stMain"] div[data-baseweb="input"] > div,
+            [data-testid="stMain"] div[data-baseweb="textarea"] > div,
+            [data-testid="stMain"] div[data-baseweb="popover"],
+            [data-testid="stMain"] div[data-baseweb="menu"],
+            [data-testid="stMain"] div[role="listbox"],
             [data-testid="stMain"] textarea,
             [data-testid="stMain"] input {
                 border-radius: 8px !important;
@@ -559,21 +586,40 @@ def apply_bls_theme() -> None:
 
             [data-testid="stMain"] div[data-baseweb="select"] *,
             [data-testid="stMain"] div[data-baseweb="input"] *,
+            [data-testid="stMain"] div[data-baseweb="textarea"] *,
+            [data-testid="stMain"] div[data-baseweb="popover"] *,
+            [data-testid="stMain"] div[data-baseweb="menu"] *,
+            [data-testid="stMain"] div[role="listbox"] *,
             [data-testid="stMain"] [data-baseweb="radio"] *,
             [data-testid="stMain"] [data-baseweb="checkbox"] * {
                 color: var(--vn-black) !important;
                 fill: var(--vn-black) !important;
             }
 
+            div[data-baseweb="popover"],
+            div[data-baseweb="menu"],
+            div[role="listbox"],
+            div[data-baseweb="popover"] *,
+            div[data-baseweb="menu"] *,
+            div[role="listbox"] * {
+                background-color: var(--vn-white) !important;
+                color: var(--vn-black) !important;
+                fill: var(--vn-black) !important;
+            }
+
             [data-testid="stMain"] [data-testid="stFileUploader"] section,
-            [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] {
+            [data-testid="stMain"] [data-testid="stFileUploaderDropzone"],
+            [data-testid="stMain"] [data-testid="stFileUploaderFile"],
+            [data-testid="stMain"] [data-testid="stFileUploaderFile"] div,
+            [data-testid="stMain"] [data-testid="stFileUploaderFile"] button {
                 background: var(--vn-white) !important;
                 border: 1px solid var(--vn-gray-200) !important;
                 border-radius: 8px !important;
             }
 
             [data-testid="stMain"] [data-testid="stFileUploader"] section *,
-            [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] * {
+            [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] *,
+            [data-testid="stMain"] [data-testid="stFileUploaderFile"] * {
                 color: var(--vn-black) !important;
                 fill: var(--vn-black) !important;
             }
@@ -581,9 +627,17 @@ def apply_bls_theme() -> None:
             [data-testid="stDataFrame"],
             [data-testid="stDataFrameGlideDataEditor"],
             [data-testid="stDataEditor"],
-            [data-testid*="GlideDataEditor"] {
+            [data-testid*="GlideDataEditor"],
+            [data-testid="stDataFrame"] *,
+            [data-testid="stDataEditor"] *,
+            [class*="glideDataEditor"],
+            [class*="GlideDataEditor"] {
                 --gdg-bg-cell: var(--vn-white) !important;
                 --gdg-bg-cell-medium: var(--vn-white) !important;
+                --gdg-bg-cell-disabled: var(--vn-gray-50) !important;
+                --gdg-bg-bubble: var(--vn-white) !important;
+                --gdg-bg-bubble-selected: var(--vn-gray-100) !important;
+                --gdg-bg-search-result: #fff3f7 !important;
                 --gdg-bg-header: var(--vn-gray-50) !important;
                 --gdg-bg-header-has-focus: var(--vn-gray-50) !important;
                 --gdg-bg-header-hovered: var(--vn-gray-100) !important;
@@ -591,13 +645,21 @@ def apply_bls_theme() -> None:
                 --gdg-text-medium: #333333 !important;
                 --gdg-text-light: #666666 !important;
                 --gdg-text-header: var(--vn-black) !important;
+                --gdg-text-group-header: var(--vn-black) !important;
                 --gdg-border-color: var(--vn-gray-200) !important;
                 --gdg-horizontal-border-color: var(--vn-gray-200) !important;
                 --gdg-accent-color: var(--vn-red) !important;
                 --gdg-accent-fg: var(--vn-white) !important;
+                --gdg-fg-icon-header: var(--vn-black) !important;
+                --gdg-bg-icon-header: transparent !important;
                 color-scheme: light !important;
                 background: var(--vn-white) !important;
                 color: var(--vn-black) !important;
+            }
+
+            [data-testid="stDataFrame"] canvas,
+            [data-testid="stDataEditor"] canvas {
+                background: var(--vn-white) !important;
             }
 
             .vn-norm-table-wrap {
