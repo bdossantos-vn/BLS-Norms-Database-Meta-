@@ -228,7 +228,7 @@
       "Source variable": "Purchase Intent"
     },
     {
-      "Box scores": "",
+      "Box scores": "T2B",
       "Denominator": "Total answering",
       "Include": true,
       "Norm / benchmark": "Tech Leadership",
@@ -252,7 +252,7 @@
       "Source variable": "Brand Advocacy"
     },
     {
-      "Box scores": "",
+      "Box scores": "T2B",
       "Denominator": "Total answering",
       "Include": true,
       "Norm / benchmark": "Retention",
@@ -268,7 +268,7 @@
       "Source variable": "Feature Awareness"
     },
     {
-      "Box scores": "",
+      "Box scores": "T2B",
       "Denominator": "Total answering",
       "Include": true,
       "Norm / benchmark": "AI Interest",
@@ -376,158 +376,7 @@
     "rid": "rid",
     "year": "year"
   },
-  "response_choice_settings": {
-    "AI Interest": {
-      "mappings": {},
-      "order": [
-        "Very interested",
-        "Somewhat interested",
-        "Moderately interested",
-        "Not that interested",
-        "Not at all interested",
-        "-99"
-      ]
-    },
-    "Age": {
-      "mappings": {
-        "25 - 34": "30 - 34",
-        "35 - 44": "35 - 44"
-      },
-      "order": [
-        "Under 18",
-        "18 - 24",
-        "30 - 34",
-        "35 - 44",
-        "45+"
-      ]
-    },
-    "Brand Advocacy": {
-      "mappings": {},
-      "order": [
-        "Very likely",
-        "Quite likely",
-        "Moderately likely",
-        "Not that likely",
-        "Not at all likely"
-      ]
-    },
-    "Brand Sentiment": {
-      "mappings": {
-        "Netural": "Neutral"
-      },
-      "order": [
-        "Love it",
-        "Like it",
-        "Neutral",
-        "Dislike it",
-        "Hate it"
-      ]
-    },
-    "OM Feature Awareness": {
-      "mappings": {
-        "Ask Meta AI": "Look and ask AI (Artificial Intelligence)",
-        "Capture photos/ videos": "Capture photos and videos"
-      },
-      "order": [
-        "Look and ask AI (Artificial Intelligence)",
-        "Capture photos and videos",
-        "Open ear audio",
-        "Garmin integration for real-time fitness stats",
-        "None of these"
-      ]
-    },
-    "Purchase Intent": {
-      "mappings": {},
-      "order": [
-        "Very likely",
-        "Quite likely",
-        "Moderately likely",
-        "Not that likely",
-        "Not at all likely"
-      ]
-    },
-    "Retention": {
-      "mappings": {},
-      "order": [
-        "Very likely",
-        "Quite likely",
-        "Moderately likely",
-        "Not that likely",
-        "Not at all likely"
-      ]
-    },
-    "Tech Leadership": {
-      "mappings": {},
-      "order": [
-        "Leads much more often",
-        "Leads somewhat more often",
-        "Follows somewhat more often",
-        "Follows more often"
-      ]
-    },
-    "WRBLS Awareness": {
-      "mappings": {
-        "Meta Ray-Ban Display": "Meta Ray-Ban Displays"
-      },
-      "order": [
-        "Amazon Echo Frames",
-        "Bose Frames",
-        "Snap Spectacles 3",
-        "Ray-Ban Meta Glasses",
-        "Meta Ray-Ban Displays",
-        "Oakley Meta Glasses",
-        "Carrera Glasses with Alexa",
-        "Solos AirGo3",
-        "Huawei Eyewear 2",
-        "XREAL Air/2/Pro",
-        "None of these"
-      ]
-    },
-    "WRBLS BR Awareness": {
-      "mappings": {
-        "None of the these": "None of these"
-      },
-      "order": [
-        "Meta",
-        "Apple",
-        "Snapchat",
-        "Bose",
-        "Amazon",
-        "Ray-Ban",
-        "Google",
-        "Carrera",
-        "Oakley",
-        "Prada",
-        "None of these"
-      ]
-    },
-    "WRBLS Consideration": {
-      "mappings": {
-        "Meta Ray-Ban Display": "Meta Ray-Ban Displays"
-      },
-      "order": [
-        "Amazon Echo Frames",
-        "Bose Frames",
-        "Snap Spectacles 3",
-        "Ray-Ban Meta Glasses",
-        "Meta Ray-Ban Displays",
-        "Oakley Meta Glasses",
-        "Carrera Glasses with Alexa",
-        "Solos AirGo3",
-        "Huawei Eyewear 2",
-        "XREAL Air/2/Pro",
-        "None of these"
-      ]
-    }
-  },
   "response_labels": {
-    "Age": {
-      "18 - 24": "18 - 24",
-      "30 - 34": "30 - 34",
-      "35 - 44": "35 - 44",
-      "45+": "45+",
-      "Under 18": "Under 18"
-    },
     "Brand Awareness": {
       "Amazon": "Amazon",
       "Apple": "Apple",
@@ -540,13 +389,6 @@
       "Prada": "Prada",
       "Ray-Ban": "Ray-Ban",
       "Snapchat": "Snapchat"
-    },
-    "Brand Sentiment": {
-      "Dislike it": "Dislike it",
-      "Hate it": "Hate it",
-      "Like it": "Like it",
-      "Love it": "Love it",
-      "Neutral": "Neutral"
     },
     "Consideration": {
       "Amazon Echo Frames": "Amazon Echo Frames",
