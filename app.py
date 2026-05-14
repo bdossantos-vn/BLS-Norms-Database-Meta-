@@ -2650,6 +2650,33 @@ def combine_grouped_multi_select_values(
     return pd.Series(values, index=df.index, dtype=object)
 
 
+def merge_delimited_answer_values(existing_value, incoming_value, delimiter: str) -> str | None:
+    selected_options = []
+    for value in [existing_value, incoming_value]:
+        for option in split_answers(value, True, delimiter):
+            if option and option not in selected_options:
+                selected_options.append(option)
+    return delimiter.join(selected_options) if selected_options else None
+
+
+def merge_delimited_answer_series(
+    existing_series: pd.Series,
+    incoming_series: pd.Series,
+    delimiter: str,
+) -> pd.Series:
+    return pd.Series(
+        [
+            merge_delimited_answer_values(existing_value, incoming_value, delimiter)
+            for existing_value, incoming_value in zip(
+                existing_series.tolist(),
+                incoming_series.tolist(),
+            )
+        ],
+        index=existing_series.index,
+        dtype=object,
+    )
+
+
 def apply_column_group_decisions(
     df: pd.DataFrame,
     question_labels: dict[str, str],
@@ -2698,11 +2725,11 @@ def apply_column_group_decisions(
     }
     group_by_id = {group["candidate"].group_id: group for group in selected_groups}
     grouped_source_columns = set(source_to_group_id)
-    used_names = {
-        str(column)
-        for column in df.columns
-        if column not in grouped_source_columns
+    output_names_by_group_id = {
+        group["candidate"].group_id: group["variable_name"]
+        for group in selected_groups
     }
+    reserved_output_names = set(output_names_by_group_id.values())
 
     new_columns: dict[str, pd.Series] = {}
     updated_question_labels: dict[str, str] = {}
@@ -2714,6 +2741,9 @@ def apply_column_group_decisions(
     for column in df.columns:
         group_id = source_to_group_id.get(column)
         if group_id is None:
+            if column in reserved_output_names:
+                continue
+
             new_columns[column] = df[column]
             if column in question_labels:
                 updated_question_labels[column] = question_labels[column]
@@ -2726,18 +2756,26 @@ def apply_column_group_decisions(
 
         group = group_by_id[group_id]
         candidate = group["candidate"]
-        variable_name = make_unique_name(group["variable_name"], used_names)
-        new_columns[variable_name] = combine_grouped_multi_select_values(
+        variable_name = output_names_by_group_id[group_id]
+        grouped_values = combine_grouped_multi_select_values(
             df,
             candidate,
             delimiter,
         )
-        updated_question_labels[variable_name] = candidate.question_text
-        updated_response_labels[variable_name] = {
-            choice: choice
-            for choice in candidate.response_choices
-            if normalize_answer(choice)
-        }
+        if variable_name in new_columns:
+            new_columns[variable_name] = merge_delimited_answer_series(
+                new_columns[variable_name],
+                grouped_values,
+                delimiter,
+            )
+        else:
+            new_columns[variable_name] = grouped_values
+
+        updated_question_labels.setdefault(variable_name, candidate.question_text)
+        variable_response_labels = updated_response_labels.setdefault(variable_name, {})
+        for choice in candidate.response_choices:
+            if normalize_answer(choice):
+                variable_response_labels.setdefault(choice, choice)
         structure_question_types[variable_name] = group["question_type"]
         grouped_descriptions.append(
             f"{variable_name} ({len(candidate.source_columns)} columns)"
