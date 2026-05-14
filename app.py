@@ -1112,7 +1112,12 @@ def load_norm_mapping_settings() -> dict[str, str]:
 
 
 def save_norm_mapping_settings(settings: dict[str, str]) -> None:
-    NORM_MAPPING_PATH.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n")
+    clean_settings = {
+        source: target
+        for source, target in settings.items()
+        if normalize_answer(target)
+    }
+    NORM_MAPPING_PATH.write_text(json.dumps(clean_settings, indent=2, sort_keys=True) + "\n")
 
 
 def load_box_score_settings() -> dict[str, list[str]]:
@@ -2099,7 +2104,7 @@ def norm_audit_prior_rule_issues(
     for row in editor_df.to_dict(orient="records"):
         question = normalize_answer(row.get("Variable Name"))
         question_label = normalize_answer(row.get("Question Text")) or question
-        selected_norm = normalize_answer(row.get("Norm / benchmark"))
+        selected_norm = resolved_norm_from_audit_row(row)
         is_na = (
             bool(row.get("NA"))
             or selected_norm == NA_NORM_OPTION
@@ -2159,6 +2164,19 @@ def norm_audit_prior_rule_issues(
     return issues
 
 
+def resolved_norm_from_audit_row(row: dict) -> str | None:
+    variable = normalize_answer(row.get("Variable Name"))
+    custom_norm = normalize_answer(row.get("Custom norm/benchmark"))
+    selected_norm = normalize_answer(row.get("Norm / benchmark"))
+    if selected_norm == NA_NORM_OPTION:
+        return NA_NORM_OPTION
+    if bool(row.get("Use variable name")) and variable:
+        return variable
+    if custom_norm:
+        return custom_norm
+    return selected_norm
+
+
 def build_norm_catalog(
     candidate_questions: list[str],
     saved_mappings: dict[str, str],
@@ -2184,12 +2202,6 @@ def build_norm_catalog(
         ):
             catalog.append(normalized_target)
 
-    for question in candidate_questions:
-        if is_default_na_metadata_variable(question) or is_project_metadata_variable(question):
-            continue
-        if question not in catalog:
-            catalog.append(question)
-
     return catalog
 
 
@@ -2198,12 +2210,12 @@ def closest_norm_benchmark(
     question_label: str,
     norm_catalog: list[str],
     question_labels: dict[str, str],
-) -> str:
+) -> str | None:
     if variable in norm_catalog:
         return variable
 
     source_candidates = [variable, question_label]
-    best_norm = variable
+    best_norm = None
     best_score = 0.0
 
     for norm in norm_catalog:
@@ -2221,7 +2233,7 @@ def closest_norm_benchmark(
                     best_score = score
                     best_norm = norm
 
-    return best_norm if best_score >= 0.55 else variable
+    return best_norm if best_norm and best_score >= 0.55 else None
 
 
 def resolve_saved_norm_for_question(
@@ -2302,24 +2314,40 @@ def build_norm_audit_frame(
     for question in candidate_questions:
         question_label = display_question_label(question, question_labels)
         is_metadata_variable = is_default_na_metadata_variable(question)
-        suggested_norm = (
-            NA_NORM_OPTION
-            if is_metadata_variable
-            else closest_norm_benchmark(
-                question,
-                question_label,
-                norm_catalog,
-                question_labels,
-            )
+        closest_existing_norm = None if is_metadata_variable else closest_norm_benchmark(
+            question,
+            question_label,
+            norm_catalog,
+            question_labels,
         )
+        suggested_norm = closest_existing_norm or NA_NORM_OPTION
         saved_norm = resolve_saved_norm_for_question(
             question,
             question_label,
             saved_mappings,
             saved_na_aliases,
         )
-        selected_norm = saved_norm if saved_norm is not None else suggested_norm
+        if saved_norm is not None:
+            selected_norm = saved_norm
+        elif closest_existing_norm:
+            selected_norm = closest_existing_norm
+        else:
+            selected_norm = NA_NORM_OPTION if is_metadata_variable else ""
         is_na = selected_norm == NA_NORM_OPTION
+        selected_existing_norm = (
+            selected_norm
+            if selected_norm in norm_catalog or selected_norm == NA_NORM_OPTION
+            else ""
+        )
+        custom_norm = (
+            selected_norm
+            if selected_norm
+            and selected_norm not in norm_catalog
+            and selected_norm != NA_NORM_OPTION
+            and selected_norm != question
+            else ""
+        )
+        use_variable_name = selected_norm == question and selected_norm not in norm_catalog
         prior_rule = preferred_prior_norm_rule(
             question,
             question_label,
@@ -2359,7 +2387,9 @@ def build_norm_audit_frame(
                 "Question Text": question_label,
                 "Question Type": question_type,
                 "Suggested norm/benchmark": suggested_norm,
-                "Norm / benchmark": selected_norm,
+                "Norm / benchmark": selected_existing_norm,
+                "Use variable name": use_variable_name,
+                "Custom norm/benchmark": custom_norm,
                 "T2B": "T2B" in selected_box_scores,
                 "T3B": "T3B" in selected_box_scores,
                 "B2B": "B2B" in selected_box_scores,
@@ -2434,7 +2464,7 @@ def normalize_na_aliases_from_audit_editor(editor_df: pd.DataFrame) -> set[str]:
         return aliases
 
     for row in editor_df.to_dict(orient="records"):
-        selected_norm = normalize_answer(row.get("Norm / benchmark"))
+        selected_norm = resolved_norm_from_audit_row(row)
         is_na = (
             bool(row.get("NA"))
             or selected_norm == NA_NORM_OPTION
@@ -2494,7 +2524,7 @@ def normalize_norm_audit_editor(editor_df: pd.DataFrame) -> dict[str, str]:
 
     for row in editor_df.to_dict(orient="records"):
         variable = normalize_answer(row.get("Variable Name"))
-        selected_norm = normalize_answer(row.get("Norm / benchmark"))
+        selected_norm = resolved_norm_from_audit_row(row)
         is_na = (
             bool(row.get("NA"))
             or selected_norm == NA_NORM_OPTION
@@ -2504,7 +2534,12 @@ def normalize_norm_audit_editor(editor_df: pd.DataFrame) -> dict[str, str]:
         if not variable:
             continue
 
-        mappings[variable] = NA_NORM_OPTION if is_na else (selected_norm or variable)
+        if is_na:
+            mappings[variable] = NA_NORM_OPTION
+        elif selected_norm:
+            mappings[variable] = selected_norm
+        else:
+            mappings[variable] = ""
 
     return mappings
 
@@ -8271,11 +8306,10 @@ def main() -> None:
 
                 st.subheader("Norm / benchmark audit")
                 st.caption(
-                    "The app suggests the closest norm or benchmark from the available "
-                    "norm list. For the first project this defaults to each question's "
-                    "own variable name. Smart Tables metadata variables default to NA. "
-                    "Change the dropdown when needed, check NA to exclude a question, "
-                    "or select T2B/T3B/B2B/B3B to add top/bottom-box norm rows."
+                    "The app only suggests norms that already exist. If no saved norm "
+                    "is similar enough, the suggestion is NA and the norm is left blank "
+                    "so you can choose an existing norm, mark it NA, type a new norm "
+                    "name, or use the uploaded variable name."
                 )
 
                 upload_saved_norm_mappings = {
@@ -8291,7 +8325,7 @@ def main() -> None:
                     upload_saved_norm_mappings,
                     prior_norm_rules,
                 )
-                norm_options = [NA_NORM_OPTION, *norm_catalog]
+                norm_options = ["", NA_NORM_OPTION, *norm_catalog]
                 pending_box_score_settings = st.session_state.get(
                     "norm_audit_pending_box_score_settings",
                     {},
@@ -8386,8 +8420,19 @@ def main() -> None:
                         "Norm / benchmark": st.column_config.SelectboxColumn(
                             "Norm / benchmark",
                             options=norm_options,
-                            required=True,
+                            required=False,
+                            help="Existing saved norms only. Leave blank for a new, unresolved question.",
                             width=220,
+                        ),
+                        "Use variable name": st.column_config.CheckboxColumn(
+                            "Use variable name",
+                            help="Use the uploaded variable name as the norm name.",
+                            width=140,
+                        ),
+                        "Custom norm/benchmark": st.column_config.TextColumn(
+                            "Custom norm/benchmark",
+                            help="Type a new norm or benchmark name when this question should create one.",
+                            width=240,
                         ),
                         "T2B": st.column_config.CheckboxColumn(
                             "T2B",
